@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">TrueDev Workflow</title>
+  <desc id="desc">A gated development workflow represented by connected nodes and an approval check.</desc>
+  <defs>
+    <linearGradient id="bg" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <path d="M112 158h92M308 158h92M158 204v104M354 204v104M204 354h104" fill="none" stroke="#DDD6FE" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="112" cy="158" r="38" fill="#FFFFFF"/>
+  <circle cx="256" cy="158" r="38" fill="#C4B5FD"/>
+  <circle cx="400" cy="158" r="38" fill="#A7F3D0"/>
+  <path d="M178 356l54 54 119-138" fill="none" stroke="#FFFFFF" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

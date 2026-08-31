@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="706" height="520" viewBox="0 0 706 520" role="img" aria-labelledby="title desc">
+  <title id="title">TrueDev Workflow overview</title>
+  <desc id="desc">Project initialization produces approved slices that lifecycle delivers through explicit gates.</desc>
+  <rect width="706" height="520" rx="24" fill="#0F172A"/>
+  <text x="42" y="58" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="28" font-weight="700">TrueDev Workflow</text>
+  <text x="42" y="88" fill="#A5B4FC" font-family="Arial, sans-serif" font-size="15">Durable plans · explicit gates · evidence-backed delivery</text>
+  <rect x="42" y="120" width="622" height="142" rx="18" fill="#1E293B" stroke="#7C3AED" stroke-width="2"/>
+  <text x="66" y="153" fill="#C4B5FD" font-family="Arial, sans-serif" font-size="16" font-weight="700">PROJECT INIT</text>
+  <text x="66" y="184" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="14">Requirements → PRD → Architecture → Plan → Slices</text>
+  <g font-family="Arial, sans-serif" font-size="12" text-anchor="middle">
+    <rect x="66" y="207" width="98" height="32" rx="16" fill="#5B21B6"/><text x="115" y="228" fill="#FFFFFF">validate</text>
+    <rect x="178" y="207" width="98" height="32" rx="16" fill="#5B21B6"/><text x="227" y="228" fill="#FFFFFF">decide</text>
+    <rect x="290" y="207" width="98" height="32" rx="16" fill="#5B21B6"/><text x="339" y="228" fill="#FFFFFF">approve</text>
+    <rect x="402" y="207" width="112" height="32" rx="16" fill="#047857"/><text x="458" y="228" fill="#FFFFFF">decompose</text>
+    <rect x="528" y="207" width="112" height="32" rx="16" fill="#047857"/><text x="584" y="228" fill="#FFFFFF">handoff</text>
+  </g>
+  <path d="M353 262v42" stroke="#A5B4FC" stroke-width="3"/><path d="M345 296l8 10 8-10" fill="none" stroke="#A5B4FC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="42" y="306" width="622" height="154" rx="18" fill="#1E293B" stroke="#34D399" stroke-width="2"/>
+  <text x="66" y="339" fill="#A7F3D0" font-family="Arial, sans-serif" font-size="16" font-weight="700">LIFECYCLE</text>
+  <text x="66" y="370" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="14">Scope → Plan → Implement → Verify → Review → Close</text>
+  <path d="M82 410H620" stroke="#475569" stroke-width="6" stroke-linecap="round"/>
+  <g fill="#FFFFFF" stroke="#7C3AED" stroke-width="5">
+    <circle cx="92" cy="410" r="11"/><circle cx="196" cy="410" r="11"/><circle cx="300" cy="410" r="11"/>
+  </g>
+  <g fill="#A7F3D0" stroke="#047857" stroke-width="5">
+    <circle cx="404" cy="410" r="11"/><circle cx="508" cy="410" r="11"/><circle cx="612" cy="410" r="11"/>
+  </g>
+  <text x="42" y="496" fill="#94A3B8" font-family="Arial, sans-serif" font-size="13">Hooks guard active gates; repository permissions and CI remain authoritative.</text>
+</svg>

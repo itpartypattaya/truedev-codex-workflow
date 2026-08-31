@@ -1,0 +1,6 @@
+interface:
+  display_name: "TrueDev Lifecycle"
+  short_description: "Deliver one planned slice through explicit gates."
+  default_prompt: "Start or continue the next planned slice safely."
+policy:
+  allow_implicit_invocation: true

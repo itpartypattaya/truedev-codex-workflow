@@ -1,23 +1,31 @@
 {
+  "description": "Fail-closed lifecycle guards for active TrueDev workflows.",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "compact",
+        "matcher": "^compact$",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-lifecycle-state.sh\""
+            "command": "python3 \"$PLUGIN_ROOT/scripts/truedev_workflow.py\" hook session-start",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\truedev_workflow.py\" hook session-start",
+            "timeout": 15,
+            "statusMessage": "Restoring validated TrueDev workflow state",
+            "additionalContextLimit": 1200
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Agent",
+        "matcher": "^(Bash|apply_patch|Edit|Write|Agent|spawn_agent|mcp__.*)$",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/check-compact-gate.sh\""
+            "command": "python3 \"$PLUGIN_ROOT/scripts/truedev_workflow.py\" hook pre-tool",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\truedev_workflow.py\" hook pre-tool",
+            "timeout": 15,
+            "statusMessage": "Checking TrueDev workflow gate"
           }
         ]
       }
@@ -27,7 +35,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/check-lifecycle-gate.sh\""
+            "command": "python3 \"$PLUGIN_ROOT/scripts/truedev_workflow.py\" hook stop",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\truedev_workflow.py\" hook stop",
+            "timeout": 15,
+            "statusMessage": "Validating TrueDev workflow state"
           }
         ]
       }

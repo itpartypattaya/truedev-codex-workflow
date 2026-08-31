@@ -1,0 +1,43 @@
+{
+  "name": "truedev-workflow",
+  "version": "1.0.0",
+  "description": "A gated, file-backed product and engineering workflow for long-running Codex tasks.",
+  "author": {
+    "name": "IT Party Pattaya",
+    "url": "https://github.com/itpartypattaya"
+  },
+  "homepage": "https://github.com/itpartypattaya/truedev-codex-workflow",
+  "repository": "https://github.com/itpartypattaya/truedev-codex-workflow",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "lifecycle",
+    "planning",
+    "gates",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TrueDev Workflow",
+    "shortDescription": "Gated delivery for Codex",
+    "longDescription": "Turn a specification into durable project artifacts, then deliver each vertical slice through scoped planning, implementation, verification, review, and explicit approval gates.",
+    "developerName": "IT Party Pattaya",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/itpartypattaya/truedev-codex-workflow",
+    "privacyPolicyURL": "https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/TERMS.md",
+    "brandColor": "#5B21B6",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "logoDark": "./assets/logo-dark.svg",
+    "defaultPrompt": [
+      "Turn this specification into an approved delivery plan.",
+      "Start the next planned slice with lifecycle gates.",
+      "Show the current TrueDev workflow status."
+    ]
+  }
+}

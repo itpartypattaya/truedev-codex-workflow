@@ -4,6 +4,37 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] — 2026-08-31
+
+### Changed
+- Ported the package from its legacy agent-host format to a native Codex plugin and repo marketplace.
+- Replaced vendor-specific frontmatter, slash commands, task-list calls, and legacy instruction output with
+  portable Agent Skills instructions, `$` invocation, Codex plans, and `AGENTS.md` integration.
+- Replaced Bash/jq hooks with a cross-platform Python runner and native Codex hook schema.
+- Made project-init and lifecycle stack-neutral; repository commands and architecture choices are
+  discovered from the actual project rather than hardcoded to React/Node tooling.
+- Replaced automatic pull/stage-all/commit/push/merge/delete behavior with explicit authorization and
+  Git preflight requirements.
+
+### Security
+- State parsing and transition validation now fail closed for matched mutation tools.
+- State is resolved from the Git root, written atomically, and protected by a versioned schema.
+- Compact restoration injects only allowlisted enum/status context rather than raw state content.
+- Compact and approval gates cover Bash, `apply_patch`, subagent, and matched MCP tool calls.
+- Shell-control chaining is rejected for the narrow approval-command exemption.
+
+### Added
+- Sixteen deterministic tests covering plugin layout, state validation, gates, compaction,
+  prompt-injection resistance, nested working directories, Git preflight, project-init transitions,
+  and receipt archival.
+- Formal P0–P2 upstream audit with fix mapping.
+- Cross-platform GitHub Actions validation, deterministic public-package creation, and release checks.
+- Public listing assets, privacy, terms, support, security, and submission documentation.
+- A reviewer-ready evaluation set with five positive and three negative cases.
+
+### Fixed
+- Windows hooks now use the working `python` launcher instead of assuming `py -3` is registered.
+
 ## [0.2.0] — 2026-08-27
 
 ### Changed
@@ -21,9 +52,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
   marketplace sources instead.
 
 ### Note
-- Installs made while `0.1.0` was current may hold a stale cache, because the plugin
-  cache is keyed by version and the `gh` CLI change shipped before this bump. Run
-  `claude plugin marketplace update bergant-workflow` to refresh.
+- Installs made while `0.1.0` was current may hold a stale cache because the legacy host keyed its
+  plugin cache by version. This historical refresh command does not apply to the Codex port.
 
 ## [0.1.0] — 2026-08-21
 
