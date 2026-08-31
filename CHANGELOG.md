@@ -4,6 +4,21 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-09-01
+
+### Fixed
+- Kept lifecycle status and recovery usable on detached HEAD, with branch mismatch reported separately
+  from malformed state.
+- Added explicit compact-gate release when Codex does not emit a compact `SessionStart` event.
+- Allowed narrow read-only evidence inspection while user gates are open without allowing shell chaining,
+  redirection, sensitive-file reads, or a substitute runner.
+- Validated and restored the active slice reference; handled non-UTF-8 slice files as controlled errors.
+- Expanded sensitive-path detection for common credential, private-key store, and package-registry files.
+- Made package filenames follow the manifest version and removed internal eval fixtures from public ZIPs.
+- Hardened eval selection, empty aggregation, and the Go fixture used by release evals.
+- Synced state directories after atomic replacement on platforms that support directory fsync.
+- Fixed Windows hook commands to expand `PLUGIN_ROOT` in PowerShell.
+
 ## [1.1.0] — 2026-09-01
 
 ### Added

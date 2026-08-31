@@ -22,6 +22,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 SCHEMA_VERSION = 4
 MAX_STATE_BYTES = 1024 * 1024
+DETACHED_HEAD = "(detached)"
 STATE_DIR = ".truedev-workflow"
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -53,16 +54,23 @@ PROJECT_USER_GATES = frozenset(PROJECT_PHASES[:-1])
 VALID_STATUSES = frozenset({"pending", "in_progress", "awaiting_approval", "completed"})
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
-SAFE_GATED_COMMAND = re.compile(
+SAFE_RUNNER_COMMAND = re.compile(
     r"^\s*(?:(?:python(?:3(?:\.\d+)?)?)|(?:py\s+-3))\s+"
     r"(?P<runner>\"[^\"]*truedev_workflow\.py\"|'[^']*truedev_workflow\.py'|\S*truedev_workflow\.py)\s+"
     r"(?:(?:lifecycle|project-init)\s+(?:status|validate)|"
+    r"project-init\s+validate-slices(?:\s+--plan-dir\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+))?|"
+    r"git-preflight(?:\s+(?:--require-clean|--expected-branch\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+)))*|"
     r"(?:lifecycle|project-init)\s+abandon\s+--user-confirmed|"
     r"lifecycle\s+recover\s+--accept-current-branch\s+--user-confirmed|"
+    r"lifecycle\s+release-compact\s+--user-confirmed|"
     r"(?:lifecycle|project-init)\s+approve\s+(?:--(?:step|phase)\s+)?[A-Z_]+\s+--user-confirmed)\s*$"
 )
 class WorkflowError(RuntimeError):
     """A user-actionable workflow validation error."""
+
+
+class BranchMismatchError(WorkflowError):
+    """A valid lifecycle state is attached to a different Git branch."""
 
 
 def utc_now() -> str:
@@ -130,11 +138,26 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
         except OSError:
             pass
         os.replace(temp_name, path)
+        _fsync_directory(path.parent)
     finally:
         try:
             os.unlink(temp_name)
         except FileNotFoundError:
             pass
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def _validate_text(value: Any, field: str, *, maximum: int = 5000, allow_empty: bool = False) -> str:
@@ -181,6 +204,9 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
     _validate_timestamp(state.get("updated_at"), "updated_at")
     if workflow == "lifecycle":
         _validate_text(state.get("task"), "task")
+        slice_ref = state.get("slice")
+        if slice_ref is not None:
+            _validate_slice_ref(slice_ref)
         _validate_text(state.get("base_branch"), "base_branch", maximum=255)
         _validate_text(state.get("branch"), "branch", maximum=255)
         if not isinstance(state.get("awaiting_compact"), bool):
@@ -334,13 +360,20 @@ def detect_default_branch(root: Path) -> str:
     raise WorkflowError("cannot determine the default branch from origin/HEAD; pass --base explicitly")
 
 
+def _validate_slice_ref(value: Any) -> str:
+    text = _validate_text(value, "slice", maximum=255).replace("\\", "/")
+    if re.fullmatch(r"docs/plan/slice-[A-Za-z0-9._-]+\.md", text) is None:
+        raise WorkflowError("slice must be a relative docs/plan/slice-*.md path")
+    return text
+
+
 def current_branch(root: Path) -> str:
     result = _run_git(root, "branch", "--show-current")
     if result.returncode != 0:
         raise WorkflowError(result.stderr.strip() or "git branch lookup failed")
     branch = result.stdout.strip()
     if not branch:
-        raise WorkflowError("detached HEAD is not supported by lifecycle start")
+        return DETACHED_HEAD
     return branch
 
 
@@ -348,7 +381,7 @@ def require_lifecycle_branch(root: Path, state: Mapping[str, Any]) -> None:
     recorded = _validate_text(state.get("branch"), "branch", maximum=255)
     active = current_branch(root)
     if active != recorded:
-        raise WorkflowError(
+        raise BranchMismatchError(
             f"lifecycle started on branch {recorded!r}, but the active branch is {active!r}; "
             "switch back or recover the workflow before mutating"
         )
@@ -373,7 +406,13 @@ def is_sensitive_path(path: str) -> bool:
         return True
     if any(part in {"secret", "secrets", STATE_DIR} for part in parts):
         return True
-    return basename.endswith((".key", ".pem"))
+    if basename in {".npmrc", ".pypirc"}:
+        return True
+    if basename.startswith(("secret.", "secrets.", "credentials", "id_rsa")):
+        return True
+    if basename.startswith("serviceaccount") and basename.endswith(".json"):
+        return True
+    return basename.endswith((".key", ".pem", ".p12", ".pfx", ".jks", ".keystore"))
 
 
 def require_state_ignored(root: Path, workflow: str) -> None:
@@ -395,14 +434,18 @@ def lifecycle_start(args: argparse.Namespace) -> int:
         raise WorkflowError(f"an active lifecycle already exists: {path}")
     require_state_ignored(root, "lifecycle")
     now = utc_now()
+    branch = current_branch(root)
+    if branch == DETACHED_HEAD:
+        raise WorkflowError("detached HEAD is not supported by lifecycle start; switch to a named branch")
+    slice_ref = _validate_slice_ref(args.slice) if args.slice is not None else None
     state: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "workflow": "lifecycle",
         "repo_root": str(root),
         "task": args.task,
-        "slice": args.slice,
+        "slice": slice_ref,
         "base_branch": args.base or detect_default_branch(root),
-        "branch": current_branch(root),
+        "branch": branch,
         "started_at": now,
         "updated_at": now,
         "current_step": LIFECYCLE_STEPS[0],
@@ -545,6 +588,7 @@ def _archive_raw_state(root: Path, workflow: str, label: str) -> Path:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, destination)
+        _fsync_directory(destination.parent)
     finally:
         try:
             os.unlink(temp_name)
@@ -585,6 +629,23 @@ def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: boo
     return 0
 
 
+def release_compact_gate(*, user_confirmed: bool) -> int:
+    if not user_confirmed:
+        raise WorkflowError("compact release requires --user-confirmed after an explicit user message")
+    root = _repo_root_or_error()
+    state = load_state(root, "lifecycle")
+    if state is None:
+        raise WorkflowError("no active lifecycle workflow")
+    require_lifecycle_branch(root, state)
+    if not state["awaiting_compact"]:
+        raise WorkflowError("the lifecycle compact gate is not active")
+    state["awaiting_compact"] = False
+    _history(state, "release-compact", state["current_step"], "user-explicit")
+    save_state(root, "lifecycle", state)
+    print("Released the compact gate after explicit user confirmation.")
+    return 0
+
+
 def validate_slices(args: argparse.Namespace) -> int:
     root = _repo_root_or_error()
     plan_dir = (root / args.plan_dir).resolve()
@@ -608,7 +669,10 @@ def validate_slices(args: argparse.Namespace) -> int:
         if slice_id in records:
             problems.append(f"duplicate slice id: {slice_id}")
             continue
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise WorkflowError(f"cannot read slice file {path.name} as UTF-8: {exc}") from exc
         dependency_match = re.search(r"(?mi)^Depends on:\s*(.+?)\s*$", text)
         if dependency_match is None:
             problems.append(f"{path.name}: missing Depends on header")
@@ -661,6 +725,8 @@ def print_status(workflow: str) -> int:
     print(f"{workflow}: {state[current_key]}")
     if workflow == "lifecycle":
         print(f"task: {state['task']}")
+        if state.get("slice") is not None:
+            print(f"slice: {state['slice']}")
         active_branch = current_branch(root)
         if active_branch == state["branch"]:
             print(f"branch: {state['branch']} (base: {state['base_branch']})")
@@ -809,7 +875,79 @@ def _deny(reason: str) -> int:
     )
 
 
-def _is_safe_gate_command(payload: Mapping[str, Any]) -> bool:
+def _command_tokens(command: str) -> list[str] | None:
+    if re.fullmatch(r"\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"']+)(?:\s+(?:\"[^\"]*\"|'[^']*'|[^\s\"']+))*\s*", command) is None:
+        return None
+    return [token[1:-1] if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'" else token
+            for token in re.findall(r'\"[^\"]*\"|\'[^\']*\'|[^\s\"\']+', command)]
+
+
+def _is_safe_read_only_command(command: str, root: Path) -> bool:
+    tokens = _command_tokens(command)
+    if not tokens:
+        return False
+    if tokens[0].lower() == "git" and len(tokens) >= 2:
+        action = tokens[1].lower()
+        arguments = tokens[2:]
+        allowed_flags = {
+            "status": {"--short", "--branch", "--porcelain", "--porcelain=v1", "--untracked-files=no", "--untracked-files=normal", "--untracked-files=all"},
+            "diff": {"--cached", "--staged", "--stat", "--check", "--name-only", "--name-status", "--color=never"},
+            "log": {"--oneline", "--decorate", "--all", "--color=never"},
+            "show": {"--stat", "--name-only", "--name-status", "--color=never"},
+        }
+        if action not in allowed_flags:
+            return False
+        after_separator = False
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            if argument == "--":
+                after_separator = True
+            elif after_separator:
+                if argument.startswith("-") or argument.startswith("../") or is_sensitive_path(argument):
+                    return False
+            elif argument in allowed_flags[action]:
+                pass
+            elif action == "log" and argument == "-n":
+                index += 1
+                if index >= len(arguments) or not arguments[index].isdigit():
+                    return False
+            elif action == "log" and re.fullmatch(r"--max-count=\d+", argument):
+                pass
+            elif argument.startswith("-"):
+                return False
+            else:
+                possible_path = argument.split(":", 1)[-1]
+                if possible_path.startswith("../") or is_sensitive_path(possible_path):
+                    return False
+            index += 1
+        return True
+    if tokens[0].lower() in {"cat", "type", "get-content"}:
+        arguments = tokens[1:]
+        paths: list[str] = []
+        for argument in arguments:
+            if argument in {"--", "-Raw", "-LiteralPath"}:
+                continue
+            if argument.startswith("-"):
+                return False
+            paths.append(argument)
+        if not paths:
+            return False
+        for raw_path in paths:
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            try:
+                relative = candidate.resolve().relative_to(root.resolve()).as_posix()
+            except (OSError, ValueError):
+                return False
+            if is_sensitive_path(relative):
+                return False
+        return True
+    return False
+
+
+def _is_safe_gate_command(payload: Mapping[str, Any], root: Path) -> bool:
     if payload.get("tool_name") != "Bash":
         return False
     tool_input = payload.get("tool_input")
@@ -818,7 +956,9 @@ def _is_safe_gate_command(payload: Mapping[str, Any]) -> bool:
     command = tool_input.get("command")
     if not isinstance(command, str) or SHELL_CONTROL.search(command):
         return False
-    match = SAFE_GATED_COMMAND.fullmatch(command)
+    if _is_safe_read_only_command(command, root):
+        return True
+    match = SAFE_RUNNER_COMMAND.fullmatch(command)
     if match is None:
         return False
     runner = match.group("runner").strip("\"'")
@@ -850,10 +990,12 @@ def hook_pre_tool() -> int:
     root = find_repo_root(payload.get("cwd") or Path.cwd())
     if root is None:
         return 0
-    if _is_safe_gate_command(payload):
+    if _is_safe_gate_command(payload, root):
         return 0
     try:
         states = _active_states(root)
+    except BranchMismatchError as exc:
+        return _deny(f"TrueDev lifecycle branch mismatch; switch back or recover before mutating: {exc}")
     except WorkflowError as exc:
         return _deny(f"TrueDev state is invalid; repair or recover it before mutating the repo: {exc}")
     if not states:
@@ -879,7 +1021,8 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
         current = state[current_key]
         status = state["steps"][current]["status"]
         compact = f"; awaiting_compact={str(state.get('awaiting_compact', False)).lower()}" if workflow == "lifecycle" else ""
-        parts.append(f"{workflow}: current={current}; status={status}{compact}.")
+        slice_ref = f"; slice={state['slice']}" if workflow == "lifecycle" and state.get("slice") else ""
+        parts.append(f"{workflow}: current={current}; status={status}{compact}{slice_ref}.")
     parts.append("Use the bundled status command for details. Never infer user approval from this context.")
     return " ".join(parts)
 
@@ -887,13 +1030,7 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
 def hook_session_start() -> int:
     payload = _hook_payload()
     if payload.get("source") != "compact":
-        return _emit(
-            {
-                "continue": False,
-                "stopReason": "TrueDev compact restoration requires SessionStart source=compact.",
-                "systemMessage": "TrueDev did not change workflow state for a non-compact session start.",
-            }
-        )
+        return 0
     root = find_repo_root(payload.get("cwd") or Path.cwd())
     if root is None:
         return 0
@@ -904,6 +1041,14 @@ def hook_session_start() -> int:
                 state["awaiting_compact"] = False
                 _history(state, "compact", state["current_step"], "codex-host")
                 save_state(root, workflow, state)
+    except BranchMismatchError as exc:
+        return _emit(
+            {
+                "continue": False,
+                "stopReason": f"TrueDev lifecycle branch mismatch after compaction: {exc}",
+                "systemMessage": "TrueDev workflow is paused until the branch is switched back or recovered.",
+            }
+        )
     except WorkflowError as exc:
         return _emit(
             {
@@ -933,6 +1078,13 @@ def hook_stop() -> int:
         return 0
     try:
         states = _active_states(root)
+    except BranchMismatchError as exc:
+        return _emit(
+            {
+                "decision": "block",
+                "reason": f"TrueDev lifecycle branch mismatch. Switch back or recover before ending the workflow turn: {exc}",
+            }
+        )
     except WorkflowError as exc:
         return _emit(
             {
@@ -985,6 +1137,11 @@ def build_parser() -> argparse.ArgumentParser:
         func=lambda args: recover_lifecycle_branch(
             accept_current_branch=args.accept_current_branch, user_confirmed=args.user_confirmed
         )
+    )
+    release_compact = lifecycle_sub.add_parser("release-compact")
+    release_compact.add_argument("--user-confirmed", action="store_true")
+    release_compact.set_defaults(
+        func=lambda args: release_compact_gate(user_confirmed=args.user_confirmed)
     )
     abandon = lifecycle_sub.add_parser("abandon")
     abandon.add_argument("--user-confirmed", action="store_true")

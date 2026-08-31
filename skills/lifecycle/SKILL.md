@@ -1,6 +1,6 @@
 ---
 name: lifecycle
-description: Run a planned software slice or scoped bug fix through safe context checking, scope approval, planning, implementation, verification, testing, review, documentation, and closeout. Use whenever the user asks to start or continue a feature lifecycle, implement the next slice, fix a bug within an active delivery workflow, check workflow status, resume after compaction, or enforce approval gates during a long Codex coding task. Do not use for a one-off explanation or read-only review that is not part of an active delivery workflow.
+description: Run a planned software slice or scoped bug fix through safe context checking, scope approval, planning, implementation, testing, verification, review, documentation, and closeout. Use whenever the user asks to start or continue a feature lifecycle, implement the next slice, fix a bug within an active delivery workflow, check workflow status, resume after compaction, or enforce approval gates during a long Codex coding task. Do not use for a one-off explanation or read-only review that is not part of an active delivery workflow.
 ---
 
 # TrueDev Lifecycle
@@ -46,6 +46,8 @@ the user's repository.
   `recover --accept-current-branch --user-confirmed` only after explicit approval.
 - **invalid or obsolete state:** do not fabricate approvals. Offer `abandon --user-confirmed`, which
   preserves the original state in history before allowing a clean restart.
+- **compact event unavailable:** explain the missing host evidence and use
+  `release-compact --user-confirmed` only after the user explicitly accepts bypassing that checkpoint.
 
 If a runner command fails, report the error once. Do not retry by weakening validation or editing the
 state file manually.
@@ -85,6 +87,7 @@ python3 <RUNNER> lifecycle gate --step <USER_GATE>
 python3 <RUNNER> lifecycle approve --step <USER_GATE> --user-confirmed
 python3 <RUNNER> lifecycle skip --step COMPONENTS --reason non-ui
 python3 <RUNNER> lifecycle recover --accept-current-branch --user-confirmed
+python3 <RUNNER> lifecycle release-compact --user-confirmed
 python3 <RUNNER> lifecycle abandon --user-confirmed
 python3 <RUNNER> lifecycle archive
 ```
@@ -92,6 +95,10 @@ python3 <RUNNER> lifecycle archive
 Before `gate`, finish the work and present the evidence the user needs to decide. After `gate`, stop
 mutating the repository until approval. A vague “continue” does not approve a named gate when the
 decision or consequences are unclear.
+
+While a gate is open, use only the runner's validation/status commands or narrow read-only inspection
+commands (`git status/diff/log/show` and repository-local non-sensitive file reads). Chaining,
+redirection, writes, and sensitive-path reads remain blocked.
 
 ## Step order
 

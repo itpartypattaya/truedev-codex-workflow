@@ -117,6 +117,8 @@ def run_judge(runs: list[dict[str, Any]], workspace: Path) -> tuple[dict[str, An
 
 
 def metric(values: list[float]) -> dict[str, float]:
+    if not values:
+        raise RuntimeError("cannot compute benchmark metrics without completed runs")
     return {
         "mean": round(statistics.mean(values), 4),
         "stddev": round(statistics.pstdev(values), 4),
@@ -138,6 +140,8 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
             raise RuntimeError(f"judge changed or reordered expectations for {key}")
         passed = sum(1 for item in grade["expectations"] if item["passed"])
         total = len(grade["expectations"])
+        if total == 0:
+            raise RuntimeError(f"judge returned no expectations for {key}")
         timing = run["timing"]
         errors = len(run["execution_errors"])
         grading = {

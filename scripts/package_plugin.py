@@ -21,7 +21,7 @@ INCLUDED_FILES = (
     "scripts/truedev_workflow.py",
 )
 INCLUDED_TREES = (".codex-plugin", "assets", "hooks", "skills")
-EXCLUDED_NAMES = {"__pycache__", ".ruff_cache", ".pytest_cache", "dist"}
+EXCLUDED_NAMES = {"__pycache__", ".ruff_cache", ".pytest_cache", "dist", "evals"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip"}
 
 
@@ -31,7 +31,8 @@ def package_files() -> list[Path]:
         for path in (ROOT / tree).rglob("*"):
             if not path.is_file():
                 continue
-            if any(part in EXCLUDED_NAMES for part in path.parts) or path.suffix in EXCLUDED_SUFFIXES:
+            relative = path.relative_to(ROOT)
+            if any(part in EXCLUDED_NAMES for part in relative.parts) or path.suffix in EXCLUDED_SUFFIXES:
                 continue
             paths.append(path)
     unique = sorted(set(paths), key=lambda item: item.relative_to(ROOT).as_posix())
@@ -41,9 +42,13 @@ def package_files() -> list[Path]:
     return unique
 
 
-def build(output: Path) -> Path:
+def default_output(version: str) -> Path:
+    return ROOT / "dist" / f"truedev-workflow-{version}.zip"
+
+
+def build(output: Path | None = None) -> Path:
     manifest = validate()
-    output = output.resolve()
+    output = (output or default_output(manifest["version"])).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in package_files():
@@ -60,8 +65,7 @@ def build(output: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    default = ROOT / "dist" / "truedev-workflow-1.1.0.zip"
-    parser.add_argument("--output", type=Path, default=default)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     try:
         build(args.output)
