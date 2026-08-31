@@ -44,6 +44,12 @@ class PluginLayoutTests(unittest.TestCase):
             self.assertIn(f"name: {name}", text.split("---", 2)[1])
             self.assertLess(len(text.splitlines()), 500)
 
+    def test_review_requires_acceptance_evidence_matrix(self) -> None:
+        steps = (ROOT / "skills" / "lifecycle" / "references" / "steps.md").read_text(encoding="utf-8")
+        self.assertIn("| Criterion | Evidence | Gap |", steps)
+        self.assertIn("Map every approved acceptance criterion", steps)
+        self.assertIn("do not treat the matrix itself as evidence", steps)
+
     def test_marketplace_points_to_root_plugin(self) -> None:
         marketplace = json.loads(
             (ROOT / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8")

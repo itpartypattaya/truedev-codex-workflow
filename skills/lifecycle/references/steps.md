@@ -75,7 +75,15 @@ Open the COMPONENTS gate and stop.
 3. Review correctness, authorization, data integrity, concurrency, error handling, observability,
    performance, compatibility, and test gaps.
 4. Report findings as P0/P1/P2 with exact files and evidence. Do not hide findings because tests pass.
-5. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
+5. Map every approved acceptance criterion before opening the gate:
+
+   | Criterion | Evidence | Gap |
+   | --- | --- | --- |
+   | `<criterion>` | `<command/result, test, diff, or artifact>` | `none` or `<unresolved work>` |
+
+   Use `none` only when current evidence directly proves the criterion. Turn unresolved gaps into
+   findings or explicit limitations; do not treat the matrix itself as evidence.
+6. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
    verification before approval transition.
 
 ## DOCUMENT
