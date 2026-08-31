@@ -24,10 +24,12 @@ Node.js, React, npm, Vitest, Playwright, Storybook, Tailwind, or a `master` bran
 
 - Codex with plugin and hook support
 - Git
-- Python 3.9 or newer (`python3` on macOS/Linux; `py -3` on Windows)
+- Python 3.9 or newer (`python3` on macOS/Linux; `python` on Windows)
 
 Hooks are reviewed and trusted by hash in Codex. If hooks are unavailable or disabled, the skills and
 runner still work, but automatic mutation blocking is absent.
+
+![TrueDev workflow overview](docs/images/workflow-overview.png)
 
 ## Install
 
@@ -90,6 +92,10 @@ Hooks are useful guardrails, not a security boundary. The pre-tool hook covers C
 paths may not emit hook events. Repository permissions, sandboxing, protected branches, CI, and
 provider-side authorization remain authoritative.
 
+The detailed trust model, hook inputs, stored data, and limitations are documented in
+[`SECURITY.md`](SECURITY.md). TrueDev has no telemetry or bundled network client; see
+[`PRIVACY.md`](PRIVACY.md) for the complete data-handling statement.
+
 If an active state file is malformed, matching mutating tool calls fail closed. If no active state
 exists, the plugin is inert.
 
@@ -119,6 +125,26 @@ python <plugin-creator>/scripts/validate_plugin.py .
 python <skill-creator>/scripts/quick_validate.py skills/lifecycle
 python <skill-creator>/scripts/quick_validate.py skills/project-init
 ```
+
+Run the repository-owned release validation and build a deterministic public package:
+
+```text
+python scripts/validate_release.py
+python scripts/package_plugin.py
+```
+
+The ZIP intentionally excludes marketplace metadata, tests, screenshots, and repository-only docs.
+Skills-only submissions must not declare `interface.screenshots`; the review images under
+`docs/images/` are separate submission/reference assets.
+
+## Public release
+
+The publisher checklist, five positive and three negative review cases, listing copy, and
+owner-dependent Platform steps are in [`docs/public-submission.md`](docs/public-submission.md).
+The final single-run benchmark and standalone evidence viewer are available in
+[`evals/results/benchmark.md`](evals/results/benchmark.md) and
+[`evals/results/review.html`](evals/results/review.html).
+Support is handled through [`SUPPORT.md`](SUPPORT.md) and GitHub Issues.
 
 ## License
 

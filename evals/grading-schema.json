@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "grades": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "eval_id": {"type": "string"},
+          "configuration": {"type": "string", "enum": ["with_skill", "without_skill"]},
+          "expectations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {"type": "string"},
+                "passed": {"type": "boolean"},
+                "evidence": {"type": "string"}
+              },
+              "required": ["text", "passed", "evidence"],
+              "additionalProperties": false
+            }
+          },
+          "eval_feedback": {"type": "string"}
+        },
+        "required": ["eval_id", "configuration", "expectations", "eval_feedback"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["grades"],
+  "additionalProperties": false
+}

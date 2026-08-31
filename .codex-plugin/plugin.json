@@ -19,7 +19,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "TrueDev Workflow",
-    "shortDescription": "Gated planning and delivery for long Codex tasks.",
+    "shortDescription": "Gated delivery for Codex",
     "longDescription": "Turn a specification into durable project artifacts, then deliver each vertical slice through scoped planning, implementation, verification, review, and explicit approval gates.",
     "developerName": "IT Party Pattaya",
     "category": "Productivity",
@@ -28,6 +28,12 @@
       "Write"
     ],
     "websiteURL": "https://github.com/itpartypattaya/truedev-codex-workflow",
+    "privacyPolicyURL": "https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/TERMS.md",
+    "brandColor": "#5B21B6",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "logoDark": "./assets/logo-dark.svg",
     "defaultPrompt": [
       "Turn this specification into an approved delivery plan.",
       "Start the next planned slice with lifecycle gates.",

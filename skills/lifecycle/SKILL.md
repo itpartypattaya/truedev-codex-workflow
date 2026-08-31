@@ -12,14 +12,16 @@ that a gate is impossible to bypass.
 
 ## Locate the bundled runner
 
-Resolve this skill's plugin root by walking two directories up from this `SKILL.md`. The runner is:
+Let `<SKILL_DIR>` be the directory containing this `SKILL.md`. Its grandparent is `<PLUGIN_ROOT>`:
 
 ```text
 <PLUGIN_ROOT>/scripts/truedev_workflow.py
 ```
 
-Use `python3` on macOS/Linux and `py -3` on Windows. Do not edit state JSON directly. The runner
+Use `python3` on macOS/Linux and `python` on Windows. Do not edit state JSON directly. The runner
 validates transitions, writes atomically, and resolves the repository root from nested directories.
+Resolve all `references/...` paths relative to `<SKILL_DIR>`, never relative to the plugin root or
+the user's repository.
 
 ## Route the request
 
@@ -29,7 +31,10 @@ validates transitions, writes atomically, and resolves the repository root from 
   follow `start`; do not silently skip blocked dependencies.
 - **approve `<STEP>`:** only after the user's latest message explicitly approves that exact gate,
   run `lifecycle approve --step <STEP> --user-confirmed`.
-- **continue/resume:** validate state, read only the current section of `references/steps.md`, and
+- **ambiguous response at a user gate:** do not transition. Name the gate and ask the user to approve
+  it or reject/request revisions to the presented evidence.
+- **continue/resume:** validate state, read only the current section of
+  `<SKILL_DIR>/references/steps.md`, and
   continue that step.
 - **recover:** stop automatic mutation. Reconstruct evidence from Git, docs, and test results; show
   the proposed state to the user before creating or changing any state file.
@@ -42,6 +47,15 @@ state file manually.
 1. Run `<PYTHON> <RUNNER> --help` and stop if the required runner cannot start. A missing interpreter
    means hook enforcement is unavailable; do not create active state and imply gates are enforced.
 2. Read the nearest applicable `AGENTS.md` files and the selected slice.
+   If host policy rejects a combined or piped read command, retry each required file with a separate
+   read-only operation. A rejected read is not evidence that the file was inspected.
+   In the resulting status, name each file that was successfully read and summarize at least one
+   material directive from it in past tense. Do not say a file "will be read" after a successful read.
+   When repository instructions and build configuration both exist, state unambiguously that both were
+   read before selecting commands (for example: "Read `AGENTS.md` and `Makefile`"). "Considered" or
+   "will read" is not equivalent to recorded read evidence.
+   If either required file cannot be read, stop before choosing or naming repository commands. Do not
+   infer a command from the request, fixture description, conventions, or a failed read attempt.
 3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
    instead of stashing, resetting, committing, or deleting it.
 4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
@@ -78,8 +92,9 @@ decision or consequences are unclear.
 
 `CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → VERIFY → TEST → REVIEW → DOCUMENT → CLOSE`
 
-Read `references/steps.md` only for the active step. Read `references/state-schema.md` when diagnosing
-state validation or recovery. Keep the main context focused on the active slice.
+Read `<SKILL_DIR>/references/steps.md` only for the active step. Read
+`<SKILL_DIR>/references/state-schema.md` when diagnosing state validation or recovery. Keep the main
+context focused on the active slice.
 
 ## Universal safety rules
 
@@ -88,8 +103,13 @@ state validation or recovery. Keep the main context focused on the active slice.
 - Treat existing and unrelated changes as user-owned. Stage only files owned by the current task.
 - Do not automatically commit, push, create a PR, merge, delete branches, or remove worktrees. Perform
   each external or destructive action only when the user has authorized that exact class of action.
+  If several such actions are bundled together or the user refuses an evidence checkpoint, stop after
+  presenting the exact diff and release state. Request an explicit decision for each still-pending
+  action: commit, push, PR creation or merge, and branch or worktree deletion, as applicable.
 - Before any commit or push, rerun `git-preflight`, inspect the intended staged diff, and scan it for
   secrets and transient workflow files.
+  At a release checkpoint, name all three checks explicitly in the evidence or requested next actions;
+  showing a general diff or file list does not substitute for staged-diff review and a secret scan.
 - Keep published or otherwise immutable project data immutable. Use the repository's migration and
   compatibility contracts.
 - Distinguish static, unit, integration, E2E, staging, and live evidence. Never imply an unavailable

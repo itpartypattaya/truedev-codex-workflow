@@ -11,14 +11,17 @@ files; conversation context is not the source of truth.
 
 ## Locate the bundled runner
 
-Resolve the plugin root by walking two directories up from this `SKILL.md`, then use:
+Let `<SKILL_DIR>` be the directory containing this `SKILL.md`. Its grandparent is `<PLUGIN_ROOT>`,
+then use:
 
 ```text
 <PLUGIN_ROOT>/scripts/truedev_workflow.py
 ```
 
-Use `python3` on macOS/Linux and `py -3` on Windows. Never edit
+Use `python3` on macOS/Linux and `python` on Windows. Never edit
 `.truedev-workflow/project-init.json` directly.
+Resolve all `references/...` paths relative to `<SKILL_DIR>`, never relative to the plugin root or
+the user's repository.
 
 ## Route the request
 
@@ -26,7 +29,8 @@ Use `python3` on macOS/Linux and `py -3` on Windows. Never edit
 - **start `<spec>`:** inspect the spec and existing docs, then initialize state.
 - **approve `<PHASE>`:** only after the latest user message explicitly approves the exact phase,
   run `project-init approve --phase <PHASE> --user-confirmed`.
-- **continue/resume:** validate state and read only the active phase in `references/phases.md`.
+- **continue/resume:** validate state and read only the active phase in
+  `<SKILL_DIR>/references/phases.md`.
 - **recover:** infer nothing silently. Compare existing artifacts with the phase contracts, present a
   proposed reconstruction, and wait for confirmation before writing state.
 
@@ -35,6 +39,8 @@ Use `python3` on macOS/Linux and `py -3` on Windows. Never edit
 1. Run `<PYTHON> <RUNNER> --help` and stop if the runner cannot start. Do not create active state when
    hook enforcement and validated transitions would be unavailable.
 2. Read applicable `AGENTS.md`, the specification, and existing `docs/` artifacts.
+   If host policy rejects a combined or piped read command, retry each required file with a separate
+   read-only operation. A rejected read is not evidence that the file was inspected.
 3. If a target artifact exists, show the conflict and obtain permission before overwriting or
    materially restructuring it.
 4. Ensure `.truedev-workflow/` is ignored by Git. Refuse tracked or potentially committable state.
@@ -46,6 +52,13 @@ python3 <RUNNER> project-init start --project "<name>" --spec "<source>"
 
 6. Execute `INPUT_VALIDATION` immediately, write the proposed requirements, present open questions,
    then open its gate.
+   A short but meaningful product description is still an input specification. Do not block solely
+   because details are missing: draft substantive baseline requirements from the stated objective,
+   label assumptions, and keep unresolved decisions as open questions. Stop only when there is no
+   meaningful objective or when an unanswered choice would make even a provisional draft unsafe.
+   When repository writes are unavailable, present that provisional draft in the response instead of
+   merely saying it would be written later. Include concrete validation, error-handling, security/privacy,
+   and testing clauses that follow from the stated objective, while marking uncertain details as assumptions.
 
 ## Transition commands
 
@@ -70,9 +83,9 @@ approving. Once a gate is open, mutating repository tools are blocked by the opt
 5. `DECOMPOSITION` → `docs/plan/slice-NNN-*.md`
 6. `FINALIZE` → concise `AGENTS.md` integration and ignore rules
 
-Read only the active section in `references/phases.md`. Use
-`references/artifact-templates.md` when creating a new artifact; preserve an established project
-format when one already exists.
+Read only the active section in `<SKILL_DIR>/references/phases.md`. Use
+`<SKILL_DIR>/references/artifact-templates.md` when creating a new artifact; preserve an established
+project format when one already exists.
 
 ## Decision and research rules
 
@@ -80,6 +93,12 @@ format when one already exists.
   actual product, team, repository, and operating constraints.
 - Do not hardcode a framework, architecture style, package manager, design system, test framework,
   deployment provider, or default branch.
+- Cover the validation, error handling, security/privacy, observability, operations, and testability
+  concerns that are material to this system. Mark a concern inapplicable instead of silently omitting it.
+- Turn testability into concrete requirements before choosing a framework: define expected unit and
+  integration or contract coverage, invalid-input and boundary cases, material security and failure-mode
+  checks, and the evidence required for acceptance. Add performance, resilience, migration, or E2E
+  coverage when the system makes those concerns material.
 - Verify versions only when a version decision is required. Use current primary documentation and
   record the verification date; avoid “latest” without a source.
 - For legal, privacy, security, financial, medical, or regulatory requirements, research current

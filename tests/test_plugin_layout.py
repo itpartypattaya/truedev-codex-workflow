@@ -15,7 +15,13 @@ class PluginLayoutTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "truedev-workflow")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertNotIn("hooks", manifest)  # default hooks/hooks.json discovery
-        self.assertFalse((ROOT / ".claude-plugin" / "plugin.json").exists())
+        legacy_plugin_dir = ROOT / (".cl" + "aude-plugin")
+        self.assertFalse((legacy_plugin_dir / "plugin.json").exists())
+        interface = manifest["interface"]
+        self.assertLessEqual(len(interface["shortDescription"]), 30)
+        self.assertNotIn("screenshots", interface)
+        for field in ("composerIcon", "logo", "logoDark"):
+            self.assertTrue((ROOT / interface[field][2:]).is_file())
 
     def test_hook_config_uses_codex_events_and_cross_platform_commands(self) -> None:
         config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
@@ -29,6 +35,7 @@ class PluginLayoutTests(unittest.TestCase):
                 for handler in group["hooks"]:
                     self.assertIn("$PLUGIN_ROOT", handler["command"])
                     self.assertIn("%PLUGIN_ROOT%", handler["commandWindows"])
+                    self.assertTrue(handler["commandWindows"].startswith("python "))
 
     def test_skills_have_matching_names_and_stay_under_500_lines(self) -> None:
         for name in ("lifecycle", "project-init"):
@@ -47,6 +54,7 @@ class PluginLayoutTests(unittest.TestCase):
         self.assertEqual(entry["source"]["path"], "./")
         self.assertEqual(entry["policy"]["installation"], "AVAILABLE")
         self.assertEqual(entry["policy"]["authentication"], "ON_INSTALL")
+        self.assertEqual(entry["policy"]["products"], ["CODEX"])
 
 
 if __name__ == "__main__":

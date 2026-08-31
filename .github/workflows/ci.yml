@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, codex-native-port]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.11"
+          - os: macos-latest
+            python: "3.11"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install lint tool
+        run: python -m pip install --disable-pip-version-check ruff==0.15.16
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Compile Python
+        run: >-
+          python -m py_compile
+          scripts/truedev_workflow.py
+          scripts/validate_release.py
+          scripts/package_plugin.py
+          tests/test_truedev_workflow.py
+          tests/test_plugin_layout.py
+          tests/test_release.py
+      - name: Ruff
+        run: ruff check .
+      - name: Release contract
+        run: python scripts/validate_release.py
+      - name: Build deterministic package
+        run: python scripts/package_plugin.py
+      - name: Upload public package
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: truedev-workflow-plugin
+          path: dist/*.zip
+          if-no-files-found: error
