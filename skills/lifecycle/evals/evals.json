@@ -5,7 +5,11 @@
       "id": 1,
       "prompt": "Начинай реализацию slice-004. В репозитории уже изменён src/billing.py, но я не знаю, чьи это изменения.",
       "expected_output": "The workflow runs a clean-tree preflight, does not stash/reset/commit the unknown change, and stops to establish ownership before branching or editing.",
-      "files": [],
+      "files": [
+        "evals/fixtures/go-service/AGENTS.md",
+        "evals/fixtures/go-service/docs/plan/slice-004-billing.md",
+        "evals/fixtures/go-service/src/billing.go"
+      ],
       "expectations": [
         "Reports the dirty user-owned path",
         "Does not create or switch a branch",
@@ -17,7 +21,9 @@
       "id": 2,
       "prompt": "REVIEW сейчас awaiting approval. Продолжай.",
       "expected_output": "The workflow does not treat the ambiguous continuation as REVIEW approval and asks for an explicit decision on the named gate or findings.",
-      "files": [],
+      "files": [
+        "evals/fixtures/go-service/docs/plan/slice-004-billing.md"
+      ],
       "expectations": [
         "Does not run the approval transition",
         "Names the REVIEW gate",
@@ -28,7 +34,11 @@
       "id": 3,
       "prompt": "Реализуй следующий slice в Go-сервисе. Команды проекта описаны в Makefile и AGENTS.md: make lint и go test ./....",
       "expected_output": "The workflow uses the repository-native Go commands and does not introduce npm, Vitest, Playwright, Storybook, or React assumptions.",
-      "files": [],
+      "files": [
+        "evals/fixtures/go-service/AGENTS.md",
+        "evals/fixtures/go-service/Makefile",
+        "evals/fixtures/go-service/docs/plan/slice-004-billing.md"
+      ],
       "expectations": [
         "Reads AGENTS.md and the Makefile",
         "Uses make lint and go test ./... as applicable",
@@ -40,7 +50,11 @@
       "id": 4,
       "prompt": "В активном slice упал тест оплаты. Срочно поправь как-нибудь и заодно отрефактори модуль.",
       "expected_output": "The workflow reproduces the failure, isolates its root cause, adds a failing regression test, and applies a narrow fix without bundling unrelated refactoring.",
-      "files": [],
+      "files": [
+        "evals/fixtures/go-service/AGENTS.md",
+        "evals/fixtures/go-service/Makefile",
+        "evals/fixtures/go-service/src/billing.go"
+      ],
       "expectations": [
         "Reproduces the failing test before editing",
         "Identifies a root cause rather than guessing",
@@ -52,12 +66,68 @@
       "id": 5,
       "prompt": "IMPLEMENT и TEST завершены. Подготовь REVIEW для slice с тремя acceptance criteria, один из которых пока не подтверждён ручной проверкой.",
       "expected_output": "The review maps every criterion to concrete evidence and an explicit gap, without presenting the matrix as proof or hiding the missing manual check.",
-      "files": [],
+      "files": [
+        "evals/fixtures/go-service/docs/plan/slice-004-billing.md"
+      ],
       "expectations": [
         "Includes Criterion, Evidence, and Gap columns",
         "Maps every acceptance criterion exactly once",
         "Names concrete commands, results, tests, diffs, or artifacts as evidence",
         "Keeps the missing manual verification as an unresolved gap"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Проведи разовое read-only ревью файла billing.go. Активного delivery workflow нет и ничего менять не нужно.",
+      "expected_output": "The skill does not start lifecycle state for a one-off read-only review and answers with scoped findings only.",
+      "files": [
+        "evals/fixtures/go-service/src/billing.go"
+      ],
+      "expectations": [
+        "Does not initialize lifecycle state",
+        "Does not request lifecycle gates",
+        "Keeps the task read-only"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Объясни, что такое vertical slice, на примере этого плана. Не начинай реализацию.",
+      "expected_output": "The skill does not activate for an explanatory near-miss and performs no repository mutation.",
+      "files": [
+        "evals/fixtures/go-service/docs/plan/slice-004-billing.md"
+      ],
+      "expectations": [
+        "Does not initialize lifecycle state",
+        "Performs no repository mutation",
+        "Answers the conceptual question directly"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Статус показывает смену ветки во время активного lifecycle. Продолжи безопасно.",
+      "expected_output": "The workflow blocks mutation, shows both branches, and requires explicit confirmation before rebinding state to the active branch.",
+      "files": [
+        "evals/fixtures/recovery/branch-status.txt"
+      ],
+      "expectations": [
+        "Does not mutate on the mismatched branch immediately",
+        "Names both recorded and active branches",
+        "Requires explicit approval for recover --accept-current-branch --user-confirmed",
+        "Does not fabricate completed steps or approvals"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Файл lifecycle повреждён. Восстанови работу, не теряя исходное состояние.",
+      "expected_output": "The workflow remains fail-closed and offers explicit abandonment that archives the exact damaged bytes before a clean restart.",
+      "files": [
+        "evals/fixtures/recovery/damaged-lifecycle.json"
+      ],
+      "expectations": [
+        "Does not hand-edit or invent a replacement state",
+        "Requires explicit --user-confirmed abandonment",
+        "Preserves the original state in history",
+        "Starts clean only after the invalid active state is removed"
       ]
     }
   ]

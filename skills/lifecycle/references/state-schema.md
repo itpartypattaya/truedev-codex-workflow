@@ -6,12 +6,14 @@ by Git. Completed receipts are archived under `.truedev-workflow/history/`.
 The Python runner is the only supported writer. It validates these invariants before every atomic
 replace:
 
-- `schema_version` is currently `3` and `workflow` is `lifecycle`.
+- `schema_version` is currently `4` and `workflow` is `lifecycle`.
 - The step set and order are fixed.
 - All steps before `current_step` are completed; all later steps are pending.
 - A user gate may be `awaiting_approval`; an automatic step may not.
 - A completed user gate has an ISO-8601 UTC `approved_at` timestamp and exactly one matching,
   ordered approval receipt after its gate receipt.
+- `COMPONENTS` alone may complete with `outcome: not_applicable` and one deterministic skip receipt
+  when the work has no UI surface.
 - Lifecycle transitions and mutation hooks require the active Git branch to match the branch recorded
   at workflow start. Status remains readable and labels a mismatch for recovery.
 - `awaiting_compact` is boolean and is cleared only by a validated compact-session hook.
@@ -19,7 +21,8 @@ replace:
 
 Hooks resolve state from the Git root, even when Codex starts in a subdirectory. If the state file
 exists but is malformed or violates an invariant, mutating tool calls are denied until the state is
-recovered. If no state file exists, the plugin is inert.
+recovered or explicitly abandoned. `abandon --user-confirmed` archives the original bytes before
+removing active state; it never synthesizes approval history. If no state file exists, the plugin is inert.
 
 Session restoration injects only a small allowlisted summary: workflow name, current enum, status,
 and compact flag. Task text and arbitrary state values are never promoted into developer context.

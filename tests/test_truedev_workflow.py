@@ -127,6 +127,116 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertIn("invalid", decision["hookSpecificOutput"]["permissionDecisionReason"])
 
+    def test_malformed_state_can_only_be_abandoned_with_explicit_confirmation(self) -> None:
+        state_dir = self.root / workflow.STATE_DIR
+        state_dir.mkdir()
+        source = state_dir / workflow.LIFECYCLE_FILE
+        source.write_text("{not-json", encoding="utf-8")
+        runner = ROOT / "scripts" / "truedev_workflow.py"
+        _, output, _ = self.hook(
+            "pre-tool",
+            {
+                "cwd": str(self.root),
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": f'python "{runner}" lifecycle abandon --user-confirmed'
+                },
+            },
+        )
+        self.assertEqual(output, "")
+        _, denied, _ = self.hook(
+            "pre-tool",
+            {
+                "cwd": str(self.root),
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": "python evil/truedev_workflow.py lifecycle abandon --user-confirmed"
+                },
+            },
+        )
+        self.assertEqual(
+            json.loads(denied)["hookSpecificOutput"]["permissionDecision"],
+            "deny",
+        )
+        self.assertEqual(self.cli("lifecycle", "abandon")[0], 2)
+        code, _, error = self.cli("lifecycle", "abandon", "--user-confirmed")
+        self.assertEqual(code, 0, error)
+        self.assertFalse(source.exists())
+        archives = list((state_dir / "history").glob("*-lifecycle-abandoned.state"))
+        self.assertEqual(len(archives), 1)
+        self.assertEqual(archives[0].read_text(encoding="utf-8"), "{not-json")
+
+    def test_lifecycle_branch_recovery_preserves_original_state(self) -> None:
+        self.start_lifecycle()
+        original = workflow.state_path(self.root, "lifecycle").read_bytes()
+        git(self.root, "switch", "-c", "replacement")
+        self.assertEqual(self.cli("lifecycle", "recover", "--accept-current-branch")[0], 2)
+        code, _, error = self.cli(
+            "lifecycle",
+            "recover",
+            "--accept-current-branch",
+            "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        state = workflow.load_state(self.root, "lifecycle")
+        self.assertEqual(state["branch"], "replacement")
+        archives = list(
+            (self.root / workflow.STATE_DIR / "history").glob(
+                "*-lifecycle-before-branch-recovery.state"
+            )
+        )
+        self.assertEqual(len(archives), 1)
+        self.assertEqual(archives[0].read_bytes(), original)
+
+    def test_non_ui_components_can_be_recorded_not_applicable(self) -> None:
+        self.start_lifecycle()
+        self.assertEqual(self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")[0], 0)
+        self.assertEqual(self.cli("lifecycle", "gate", "--step", "SCOPE")[0], 0)
+        self.assertEqual(
+            self.cli("lifecycle", "approve", "--step", "SCOPE", "--user-confirmed")[0],
+            0,
+        )
+        self.assertEqual(self.cli("lifecycle", "finish", "--step", "PLAN")[0], 0)
+        code, _, error = self.cli(
+            "lifecycle", "skip", "--step", "COMPONENTS", "--reason", "non-ui"
+        )
+        self.assertEqual(code, 0, error)
+        state = workflow.load_state(self.root, "lifecycle")
+        self.assertEqual(state["current_step"], "IMPLEMENT")
+        self.assertEqual(state["steps"]["COMPONENTS"]["outcome"], "not_applicable")
+        self.assertIsNone(state["steps"]["COMPONENTS"]["approved_at"])
+
+    def test_automated_tests_precede_manual_verify_gate(self) -> None:
+        self.assertLess(
+            workflow.LIFECYCLE_STEPS.index("TEST"),
+            workflow.LIFECYCLE_STEPS.index("VERIFY"),
+        )
+
+    def test_slice_validator_accepts_dag_and_rejects_missing_nodes_and_cycles(self) -> None:
+        plan = self.root / "docs" / "plan"
+        plan.mkdir(parents=True)
+        (plan / "slice-001-foundation.md").write_text(
+            "# Foundation\n\nDepends on: none\n", encoding="utf-8"
+        )
+        (plan / "slice-002-api.md").write_text(
+            "# API\n\nDepends on: slice-001\n", encoding="utf-8"
+        )
+        code, output, error = self.cli("project-init", "validate-slices")
+        self.assertEqual(code, 0, error)
+        self.assertTrue(json.loads(output)["ok"])
+
+        (plan / "slice-001-foundation.md").write_text(
+            "# Foundation\n\nDepends on: slice-002\n", encoding="utf-8"
+        )
+        (plan / "slice-002-api.md").write_text(
+            "# API\n\nDepends on: slice-001, slice-999\n", encoding="utf-8"
+        )
+        code, output, _ = self.cli("project-init", "validate-slices")
+        self.assertEqual(code, 2)
+        problems = json.loads(output)["problems"]
+        self.assertTrue(any("missing dependency slice-999" in item for item in problems))
+        self.assertTrue(any("dependency cycle" in item for item in problems))
+
     def test_user_gate_blocks_mutation_but_allows_exact_approval_command(self) -> None:
         self.start_lifecycle()
         self.assertEqual(self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")[0], 0)

@@ -4,6 +4,23 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-09-01
+
+### Added
+- Explicit, receipt-preserving lifecycle branch recovery and fail-closed workflow abandonment.
+- Deterministic slice dependency validation for malformed IDs, missing nodes, self-dependencies, and cycles.
+- File-backed internal eval fixtures, recovery cases, and near-miss trigger checks for both skills.
+
+### Changed
+- Automated TEST now precedes the manual VERIFY gate.
+- Backend and other non-UI slices record COMPONENTS as not applicable without an empty approval gate.
+- Architecture robustness uses evidence-backed `covered`, `deferred`, or `N/A` classifications.
+- Skill metadata and default prompts now follow the current Codex skill schema.
+
+### Security
+- State reads reject symlinks and files larger than 1 MiB.
+- Recovery never fabricates approval receipts; abandonment archives the exact original state bytes.
+
 ## [1.0.0] — 2026-08-31
 
 ### Changed

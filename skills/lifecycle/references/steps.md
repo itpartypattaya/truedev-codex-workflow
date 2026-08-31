@@ -6,6 +6,9 @@ the evidence presented to the user.
 ## CONTEXT_CHECK
 
 1. Read applicable `AGENTS.md`, the selected slice, repository status, and current branch.
+   Read repository command configuration before selecting commands. Name every successfully read
+   instruction/config file and summarize at least one material directive in past tense. If a required
+   read fails, stop instead of inferring commands from conventions or the request.
 2. Run the bundled `git-preflight --require-clean` before branch or worktree changes.
 3. Confirm the slice dependencies are completed and the task does not overlap unrelated work.
 4. Record any unavailable validation layers. Do not treat them as passed.
@@ -37,8 +40,9 @@ For UI work, implement or update shared components and their repository-native v
 tests before page integration. Cover relevant loading, empty, populated, error, disabled, and
 read-only states plus keyboard and screen-reader behavior. Present render or test evidence.
 
-For non-UI work, document that there is no component surface and ask the user to approve skipping
-this gate. Do not pretend the gate does not exist.
+For non-UI work, document the evidence that no component surface exists, then run
+`lifecycle skip --step COMPONENTS --reason non-ui`. This records an explicit not-applicable receipt;
+do not open an empty user gate.
 
 Open the COMPONENTS gate and stop.
 
@@ -52,14 +56,6 @@ Open the COMPONENTS gate and stop.
 5. If scope must change, stop and return to a user decision; do not silently expand it.
 6. Finish IMPLEMENT only after the implementation checks available in the repository pass.
 
-## VERIFY — user gate
-
-1. Run discovered build, lint, formatting, type, migration, or package checks relevant to the task.
-2. Provide a short user-facing manual verification checklist.
-3. State exactly what was not executed and why.
-4. Open the VERIFY gate and wait for the user's manual-test result or explicit acceptance of the
-   documented limitation.
-
 ## TEST
 
 1. Add or update tests in the project's existing frameworks.
@@ -67,6 +63,14 @@ Open the COMPONENTS gate and stop.
    only where that layer exists and materially protects the behavior.
 3. Run the narrow tests first, then the repository's broader relevant suite.
 4. Record commands, outcomes, and unavailable layers. Finish TEST when evidence is reproducible.
+
+## VERIFY — user gate
+
+1. Run discovered build, lint, formatting, type, migration, or package checks relevant to the task.
+2. Summarize automated TEST evidence and provide a short user-facing manual verification checklist.
+3. State exactly what was not executed and why.
+4. Open the VERIFY gate and wait for the user's manual-test result or explicit acceptance of the
+   documented limitation.
 
 ## REVIEW — user gate
 

@@ -60,7 +60,7 @@ def build(output: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    default = ROOT / "dist" / "truedev-workflow-1.0.0.zip"
+    default = ROOT / "dist" / "truedev-workflow-1.1.0.zip"
     parser.add_argument("--output", type=Path, default=default)
     args = parser.parse_args(argv)
     try:

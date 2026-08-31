@@ -1,13 +1,16 @@
 ---
 name: project-init
 description: Turn a product or engineering specification into durable requirements, a PRD, architecture decisions, an implementation plan, and dependency-ordered vertical slices. Use whenever the user asks Codex to analyze a spec or ТЗ, initialize a project from requirements, create a PRD or architecture plan, decompose a project into slices, or prepare structured implementation documentation. Do not use for implementing an already-approved slice; use lifecycle for that.
-compatibility: Requires Python 3.9 or newer. Git is recommended for repository-root discovery and auditability.
 ---
 
 # TrueDev Project Init
 
 Convert an input specification into an approved, implementation-ready contract. Decisions live in
 files; conversation context is not the source of truth.
+
+## Requirements
+
+Require Python 3.9 or newer. Use Git when available for repository-root discovery and auditability.
 
 ## Locate the bundled runner
 
@@ -31,8 +34,8 @@ the user's repository.
   run `project-init approve --phase <PHASE> --user-confirmed`.
 - **continue/resume:** validate state and read only the active phase in
   `<SKILL_DIR>/references/phases.md`.
-- **recover:** infer nothing silently. Compare existing artifacts with the phase contracts, present a
-  proposed reconstruction, and wait for confirmation before writing state.
+- **invalid or obsolete state:** infer nothing and do not fabricate approvals. Offer
+  `abandon --user-confirmed`, which preserves the original state before a clean restart.
 
 ## Start
 
@@ -50,15 +53,8 @@ the user's repository.
 python3 <RUNNER> project-init start --project "<name>" --spec "<source>"
 ```
 
-6. Execute `INPUT_VALIDATION` immediately, write the proposed requirements, present open questions,
-   then open its gate.
-   A short but meaningful product description is still an input specification. Do not block solely
-   because details are missing: draft substantive baseline requirements from the stated objective,
-   label assumptions, and keep unresolved decisions as open questions. Stop only when there is no
-   meaningful objective or when an unanswered choice would make even a provisional draft unsafe.
-   When repository writes are unavailable, present that provisional draft in the response instead of
-   merely saying it would be written later. Include concrete validation, error-handling, security/privacy,
-   and testing clauses that follow from the stated objective, while marking uncertain details as assumptions.
+6. Execute `INPUT_VALIDATION` using its contract in `references/phases.md`, write the proposed
+   requirements, present open questions, then open its gate.
 
 ## Transition commands
 
@@ -68,6 +64,8 @@ python3 <RUNNER> project-init validate
 python3 <RUNNER> project-init finish --phase FINALIZE
 python3 <RUNNER> project-init gate --phase <USER_PHASE>
 python3 <RUNNER> project-init approve --phase <USER_PHASE> --user-confirmed
+python3 <RUNNER> project-init validate-slices --plan-dir docs/plan
+python3 <RUNNER> project-init abandon --user-confirmed
 python3 <RUNNER> project-init archive
 ```
 
@@ -101,9 +99,10 @@ project format when one already exists.
   coverage when the system makes those concerns material.
 - Verify versions only when a version decision is required. Use current primary documentation and
   record the verification date; avoid “latest” without a source.
-- For legal, privacy, security, financial, medical, or regulatory requirements, research current
-  authoritative sources, cite them, identify jurisdiction and date, and label remaining professional
-  sign-off. Do not convert a web summary into legal approval.
+- When legal, privacy, security, financial, medical, or regulatory requirements are material,
+  research current authoritative sources, cite them, identify jurisdiction and date, and label
+  remaining professional sign-off. Otherwise record `N/A` with a reason; do not perform ceremonial
+  research or convert a web summary into legal approval.
 - Use optional external research only when it materially improves a decision and is within the user's
   request. Missing tools are an evidence limitation, not permission to invent facts.
 - A frontend project needs appropriate accessibility, responsive behavior, component states, and

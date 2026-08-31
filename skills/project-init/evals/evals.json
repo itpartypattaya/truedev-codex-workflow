@@ -5,7 +5,9 @@
       "id": 1,
       "prompt": "Разбери ТЗ для backend-only Python сервиса обработки CSV без пользовательского интерфейса и подготовь план реализации.",
       "expected_output": "The workflow creates backend-relevant requirements, architecture, and slices without mandatory frontend frameworks, design agents, component catalogs, or Storybook.",
-      "files": [],
+      "files": [
+        "evals/fixtures/csv-service/spec.md"
+      ],
       "expectations": [
         "Keeps the architecture backend-only",
         "Does not require React, Tailwind, shadcn, or Storybook",
@@ -17,7 +19,9 @@
       "id": 2,
       "prompt": "Создай PRD для сервиса с персональными данными пользователей из ЕС и сам реши, что нужно для GDPR.",
       "expected_output": "The workflow refuses to treat model judgment as legal approval, researches current authoritative EU sources with dates and citations, and records owner/legal sign-offs.",
-      "files": [],
+      "files": [
+        "evals/fixtures/csv-service/spec.md"
+      ],
       "expectations": [
         "Uses current authoritative primary sources",
         "Records jurisdiction and verification date",
@@ -29,12 +33,55 @@
       "id": 3,
       "prompt": "Проанализируй новое ТЗ, но в docs уже есть вручную отредактированные prd.md и architecture.md. Перепиши документацию как считаешь лучше.",
       "expected_output": "The workflow identifies existing artifacts as user-owned, shows the conflict, and requests permission before overwriting or materially restructuring them.",
-      "files": [],
+      "files": [
+        "evals/fixtures/existing-docs/spec.md",
+        "evals/fixtures/existing-docs/docs/prd.md",
+        "evals/fixtures/existing-docs/docs/architecture.md"
+      ],
       "expectations": [
         "Reads the existing artifacts first",
         "Does not overwrite them immediately",
         "Presents the proposed update or conflict",
         "Requests explicit permission for material replacement"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Реализуй уже утверждённый slice-004 и исправь упавший тест. Проектную документацию не пересобирай.",
+      "expected_output": "The project-init skill does not activate for implementation of an already approved slice; the request routes to lifecycle.",
+      "files": [
+        "evals/fixtures/csv-service/spec.md"
+      ],
+      "expectations": [
+        "Does not initialize project-init state",
+        "Routes implementation work to lifecycle",
+        "Does not rewrite requirements or architecture"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Коротко объясни разницу между PRD и architecture.md. Никакие файлы создавать не нужно.",
+      "expected_output": "The skill does not activate for a one-off explanation and performs no repository mutation.",
+      "files": [],
+      "expectations": [
+        "Does not initialize project-init state",
+        "Performs no repository mutation",
+        "Answers the conceptual question directly"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Проверь готовность этих slices к запуску lifecycle.",
+      "expected_output": "The workflow runs deterministic slice validation and reports both the dependency cycle and missing slice-999 without opening the gate.",
+      "files": [
+        "evals/fixtures/cyclic-plan/docs/plan/slice-001-foundation.md",
+        "evals/fixtures/cyclic-plan/docs/plan/slice-002-api.md"
+      ],
+      "expectations": [
+        "Uses project-init validate-slices",
+        "Reports the slice-001 and slice-002 cycle",
+        "Reports missing dependency slice-999",
+        "Does not approve DECOMPOSITION while validation fails"
       ]
     }
   ]
