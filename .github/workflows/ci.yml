@@ -26,8 +26,8 @@ jobs:
             python: "3.11"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install lint tool
@@ -51,7 +51,7 @@ jobs:
         run: python scripts/package_plugin.py
       - name: Upload public package
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: truedev-workflow-plugin
           path: dist/*.zip
