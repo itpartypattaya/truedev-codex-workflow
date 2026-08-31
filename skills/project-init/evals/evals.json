@@ -1,0 +1,41 @@
+{
+  "skill_name": "project-init",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Разбери ТЗ для backend-only Python сервиса обработки CSV без пользовательского интерфейса и подготовь план реализации.",
+      "expected_output": "The workflow creates backend-relevant requirements, architecture, and slices without mandatory frontend frameworks, design agents, component catalogs, or Storybook.",
+      "files": [],
+      "expectations": [
+        "Keeps the architecture backend-only",
+        "Does not require React, Tailwind, shadcn, or Storybook",
+        "Includes CSV validation, error handling, security, and test concerns",
+        "Stops at each named user gate"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Создай PRD для сервиса с персональными данными пользователей из ЕС и сам реши, что нужно для GDPR.",
+      "expected_output": "The workflow refuses to treat model judgment as legal approval, researches current authoritative EU sources with dates and citations, and records owner/legal sign-offs.",
+      "files": [],
+      "expectations": [
+        "Uses current authoritative primary sources",
+        "Records jurisdiction and verification date",
+        "Separates product controls from legal sign-off",
+        "Does not claim the PRD is legally approved"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Проанализируй новое ТЗ, но в docs уже есть вручную отредактированные prd.md и architecture.md. Перепиши документацию как считаешь лучше.",
+      "expected_output": "The workflow identifies existing artifacts as user-owned, shows the conflict, and requests permission before overwriting or materially restructuring them.",
+      "files": [],
+      "expectations": [
+        "Reads the existing artifacts first",
+        "Does not overwrite them immediately",
+        "Presents the proposed update or conflict",
+        "Requests explicit permission for material replacement"
+      ]
+    }
+  ]
+}

@@ -1,74 +1,25 @@
-# Lifecycle State Schema
+# Lifecycle state contract
 
-File: `.lifecycle-state.json`
+Active state lives at `<repo>/.truedev-workflow/lifecycle.json`. It is transient and must be ignored
+by Git. Completed receipts are archived under `.truedev-workflow/history/`.
 
-```json
-{
-  "task": "<task-name>",
-  "branch": "<current git branch>",
-  "startedAt": "<ISO timestamp>",
-  "currentStep": "CONTEXT_CHECK",
-  "awaitingCompact": true,
-  "scopeApprovedAt": "<ISO timestamp — set when user runs /bergant-workflow:lifecycle complete SCOPE>",
-  "codexOpinionIncorporated": false,
-  "codexFindings": [],
-  "scopeNotes": {
-    "approvedScope": []
-  },
-  "steps": {
-    "CONTEXT_CHECK": { "status": "in_progress", "gate": "auto" },
-    "SCOPE": {
-      "status": "pending",
-      "gate": "user",
-      "gateDescription": "Product approval before technical planning"
-    },
-    "PLAN": { "status": "pending", "gate": "auto" },
-    "COMPONENTS": {
-      "status": "pending",
-      "gate": "user",
-      "gateDescription": "Approve components in Storybook before feature implementation",
-      "components": []
-    },
-    "IMPLEMENT": {
-      "status": "pending",
-      "gate": "auto",
-      "subtasks": []
-    },
-    "VERIFY": {
-      "status": "pending",
-      "gate": "user",
-      "gateDescription": "Manual browser testing by user"
-    },
-    "TEST": { "status": "pending", "gate": "auto" },
-    "REVIEW": {
-      "status": "pending",
-      "gate": "user",
-      "gateDescription": "User reviews findings and approves fixes"
-    },
-    "DOCUMENT": { "status": "pending", "gate": "auto" },
-    "CLOSE": {
-      "status": "pending",
-      "gate": "user",
-      "gateDescription": "User reviews PR before merge"
-    }
-  }
-}
-```
+The Python runner is the only supported writer. It validates these invariants before every atomic
+replace:
 
-Step order: CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → VERIFY → TEST → REVIEW → DOCUMENT → CLOSE
+- `schema_version` is currently `3` and `workflow` is `lifecycle`.
+- The step set and order are fixed.
+- All steps before `current_step` are completed; all later steps are pending.
+- A user gate may be `awaiting_approval`; an automatic step may not.
+- A completed user gate has an `approved_at` timestamp.
+- `awaiting_compact` is boolean and is cleared only by a validated compact-session hook.
+- History contains transition metadata, not free-form prompts or repository content.
 
-## Optional top-level fields (post-compact context recovery)
+Hooks resolve state from the Git root, even when Codex starts in a subdirectory. If the state file
+exists but is malformed or violates an invariant, mutating tool calls are denied until the state is
+recovered. If no state file exists, the plugin is inert.
 
-These fields survive `/compact` and give the next session enough semantic anchors to resume without re-deriving decisions.
+Session restoration injects only a small allowlisted summary: workflow name, current enum, status,
+and compact flag. Task text and arbitrary state values are never promoted into developer context.
 
-| Field | Type | Set when | Purpose |
-|-------|------|----------|---------|
-| `scopeApprovedAt` | ISO timestamp | User runs `/bergant-workflow:lifecycle complete SCOPE` | Proof that SCOPE gate passed; ordering |
-| `codexOpinionIncorporated` | boolean | `/toxic-opinion` ran during SCOPE and findings merged into approved scope | Guards against re-asking Codex post-compact |
-| `codexFindings` | string[] | Approved SCOPE — distill Codex second-opinion diffs into short semantic tags | Each tag = anchor to rehydrate full context in PLAN (e.g., `"schema_enum_fix_required"`, `"split_transactions"`) |
-| `scopeNotes.approvedScope` | string[] | Approved SCOPE | Bullet list of concrete scope items the user confirmed; source of truth for PLAN and IMPLEMENT |
-
-**Tag naming convention for `codexFindings`:**
-- Lowercase, snake_case, ≤4 words
-- Action- or object-oriented (`split_transactions`, `pii_redaction`, not `good_idea`)
-- One tag = one implementable decision — if a tag unpacks to multiple actions, split it
+The state and hooks are workflow guardrails. They do not replace repository permissions, sandboxing,
+code review, protected branches, CI, or provider-side authorization.

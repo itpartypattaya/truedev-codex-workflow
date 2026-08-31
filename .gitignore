@@ -1,8 +1,22 @@
-# Lifecycle / project-init runtime state — never commit, these are per-project artifacts
-.lifecycle-state.json
-docs/spec-state.json
+# TrueDev runtime state and local receipts
+.truedev-workflow/
+
+# Python validation artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
 
 # OS / editor
 .DS_Store
+Thumbs.db
 .idea/
+.vscode/
 *.log

@@ -1,87 +1,105 @@
 ---
 name: lifecycle
-description: Orchestrate feature lifecycle — track steps, enforce gates, dispatch sub-agents. Use when starting a new task, checking lifecycle status, or advancing to the next step.
-user-invocable: true
-disable-model-invocation: false
-allowed-tools: Agent, Read, Bash
-argument-hint: "[start|next|status|advance|complete <step>]"
+description: Run a planned software slice through safe context checking, scope approval, planning, implementation, verification, testing, review, documentation, and closeout. Use whenever the user asks to start or continue a feature lifecycle, implement the next slice, check workflow status, resume after compaction, or enforce approval gates during a long Codex coding task. Do not use for a one-off explanation or read-only review that is not part of an active delivery workflow.
+compatibility: Requires Git and Python 3.9 or newer. Codex hooks are optional guardrails and require user trust after installation.
 ---
 
-# Lifecycle Orchestrator
+# TrueDev Lifecycle
 
-## Routing
+Deliver one vertical slice at a time while keeping scope, approvals, and repository state explicit.
+The workflow state is durable, but hooks are guardrails rather than a security boundary. Never claim
+that a gate is impossible to bypass.
 
-**`status` (or no arguments):** execute INLINE — read `.lifecycle-state.json` and display the status table directly. Do NOT launch an agent. See "Status display" section below.
+## Locate the bundled runner
 
-This skill's directory (its reference files live here) — resolved at runtime: !`echo ${CLAUDE_SKILL_DIR}`
+Resolve this skill's plugin root by walking two directories up from this `SKILL.md`. The runner is:
 
-**All other commands** (`start`, `next`, `advance`, `complete`, `recover`): launch `Agent(general-purpose)` with the prompt below. Replace `SKILL_DIR` with the absolute path printed just above:
-
-```
-Read these files in order:
-1. SKILL_DIR/references/state-schema.md — state file structure
-2. SKILL_DIR/references/steps.md — find the section for the CURRENT step only
-
-Execute lifecycle command: $ARGUMENTS
-State file: .lifecycle-state.json
-
-Critical rules:
-1. NEVER skip a step. Order: CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → VERIFY → TEST → REVIEW → DOCUMENT → CLOSE.
-2. NEVER advance past a user gate without `/bergant-workflow:lifecycle complete <step>`.
-3. Always update state file after every transition.
-4. Always read state file before any action.
-5. Use Agent tool for heavy work (IMPLEMENT subtasks, REVIEW).
-6. Task context comes from local files in `docs/plan/slice-*.md` — do NOT use Jira MCP. Read the relevant slice file to understand task scope and dependencies.
-7. GitHub operations via the `gh` CLI (`gh pr create`, `gh pr merge`). Never use interactive
-   flags — pass `--title`/`--body` explicitly. If `gh` is missing or unauthenticated, fall back
-   to GitHub MCP (`mcp__github__*`).
-8. **Sync TaskList with step status.** When a step changes status in the state file, find the matching TaskList task by its `[STEP_NAME]` prefix and update it: `in_progress` when step starts, `completed` when step finishes. Use TaskList to find the task ID, then TaskUpdate to change status.
-9. When a task is completed, update its status in the corresponding `docs/plan/slice-*.md` file (change ⏳ to ✅).
-
-When you hit a user gate (STOP HERE), return the gate message. Return a concise summary of what was done and what the user needs to do next.
-
-IMPORTANT: When writing or updating .lifecycle-state.json, ALWAYS use the Write tool — NEVER use Bash with cat/heredoc/echo redirect. Heredoc commands trigger permission prompts.
+```text
+<PLUGIN_ROOT>/scripts/truedev_workflow.py
 ```
 
-If the agent returns an error, display it to the user without re-running.
+Use `python3` on macOS/Linux and `py -3` on Windows. Do not edit state JSON directly. The runner
+validates transitions, writes atomically, and resolves the repository root from nested directories.
 
-## Status display
+## Route the request
 
-Read `.lifecycle-state.json`. If no file exists, say "No active lifecycle. Use `/bergant-workflow:lifecycle start <task-name>` to begin."
+- **status or no explicit action:** run `lifecycle status`, report the table, and make no changes.
+- **start `<task>`:** initialize a lifecycle after the repository preflight.
+- **next:** select the first pending `docs/plan/slice-*.md` whose dependencies are completed, then
+  follow `start`; do not silently skip blocked dependencies.
+- **approve `<STEP>`:** only after the user's latest message explicitly approves that exact gate,
+  run `lifecycle approve --step <STEP> --user-confirmed`.
+- **continue/resume:** validate state, read only the current section of `references/steps.md`, and
+  continue that step.
+- **recover:** stop automatic mutation. Reconstruct evidence from Git, docs, and test results; show
+  the proposed state to the user before creating or changing any state file.
 
-Display a formatted table:
-- Each step with status emoji (⏳ pending, 🔄 in_progress, ✅ completed)
-- Current step highlighted
-- User gates marked with 🚧
-- Subtask progress for IMPLEMENT step
-- What the next action should be
+If a runner command fails, report the error once. Do not retry by weakening validation or editing the
+state file manually.
 
-## Commands (summary)
+## Start safely
 
-| Command | Action |
-|---------|--------|
-| `start <task>` | Initialize lifecycle, create state + TaskList, set `awaitingCompact: true`. Supports `--skip-scope`. |
-| `advance` | Move to next step (validates current is completed, respects gates). |
-| `complete <step>` | User confirms a gate. Marks step completed, advances. |
-| `recover` | Reconstruct state from git/build/tests when state file is lost. |
-| `next` | Read `docs/plan/slice-*.md` files, find first ⏳ task in the lowest incomplete slice, run `start` on it. |
+1. Run `<PYTHON> <RUNNER> --help` and stop if the required runner cannot start. A missing interpreter
+   means hook enforcement is unavailable; do not create active state and imply gates are enforced.
+2. Read the nearest applicable `AGENTS.md` files and the selected slice.
+3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
+   instead of stashing, resetting, committing, or deleting it.
+4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
+   task-owned change; never start with tracked or potentially committable state.
+5. Detect the default branch from Git. Do not assume `main` or `master`, and do not pull automatically.
+6. For implementation work, create a dedicated local branch or worktree only when this is within the
+   user's request. Never switch branches across unrelated user changes.
+7. Run:
 
-## State File Location
+```text
+python3 <RUNNER> lifecycle start --task "<task>" --slice "<slice-file>"
+```
 
-`.lifecycle-state.json` — in the project root (NOT under `.claude/`, which would trigger a
-write-permission prompt on every update). This file is gitignored and deleted on CLOSE.
+8. Keep Codex's task plan synchronized with the current workflow step when a plan tool is available.
 
-## Optional dependencies
+## Transition commands
 
-These power specific steps. The first time a step needs one and it's missing, offer the user a
-**one-time choice — install it now or skip the step** (note the skip). Never hard-block the
-lifecycle on a missing optional tool.
+Use these commands; never represent a transition by hand-editing JSON:
 
-| Dependency | Step | If missing |
-|------------|------|-----------|
-| `jq` (required by the hooks) | compact/gate hooks | hooks no-op → gate enforcement is OFF; warn and suggest `brew install jq` |
-| A second-opinion skill driving an external model (e.g. `toxic-opinion` + Codex CLI — not bundled) | SCOPE second opinion | skip with a note in the approved scope |
-| A dual-review skill (e.g. `toxic-review` — not bundled) | REVIEW | single in-house review Agent only, note which was used |
-| `gh` CLI (authenticated) | CLOSE (PR create/merge) | fall back to GitHub MCP (`mcp__github__*`); if neither is available, stop and let the user open/merge the PR manually |
-| Storybook | COMPONENTS | offer to add it, else skip the component-review substep |
-| Design agents (`ui-agent`/`ux-agent`/`visual-agent`/`brand-agent` — not bundled) | COMPONENTS / design tasks | proceed with a `general-purpose` agent for the design pass, note it |
+```text
+python3 <RUNNER> lifecycle status
+python3 <RUNNER> lifecycle validate
+python3 <RUNNER> lifecycle finish --step <AUTO_STEP>
+python3 <RUNNER> lifecycle gate --step <USER_GATE>
+python3 <RUNNER> lifecycle approve --step <USER_GATE> --user-confirmed
+python3 <RUNNER> lifecycle archive
+```
+
+Before `gate`, finish the work and present the evidence the user needs to decide. After `gate`, stop
+mutating the repository until approval. A vague “continue” does not approve a named gate when the
+decision or consequences are unclear.
+
+## Step order
+
+`CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → VERIFY → TEST → REVIEW → DOCUMENT → CLOSE`
+
+Read `references/steps.md` only for the active step. Read `references/state-schema.md` when diagnosing
+state validation or recovery. Keep the main context focused on the active slice.
+
+## Universal safety rules
+
+- Discover build, lint, format, test, and E2E commands from repository documentation and configuration.
+  Do not assume npm, Vitest, Playwright, React, Storybook, or any other stack.
+- Treat existing and unrelated changes as user-owned. Stage only files owned by the current task.
+- Do not automatically commit, push, create a PR, merge, delete branches, or remove worktrees. Perform
+  each external or destructive action only when the user has authorized that exact class of action.
+- Before any commit or push, rerun `git-preflight`, inspect the intended staged diff, and scan it for
+  secrets and transient workflow files.
+- Keep published or otherwise immutable project data immutable. Use the repository's migration and
+  compatibility contracts.
+- Distinguish static, unit, integration, E2E, staging, and live evidence. Never imply an unavailable
+  layer passed.
+- Missing optional tools reduce evidence; they do not justify invented results or weakened gates.
+- Use subagents only when host policy and the user's request permit them. The workflow must work with
+  one agent.
+
+## Closeout
+
+When `CLOSE` is explicitly approved and all authorized actions are complete, mark it approved and run
+`lifecycle archive`. Archiving preserves the validated receipt under `.truedev-workflow/history/` and
+removes the active state so `next` can begin another slice.

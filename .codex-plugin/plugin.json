@@ -1,0 +1,37 @@
+{
+  "name": "truedev-workflow",
+  "version": "1.0.0",
+  "description": "A gated, file-backed product and engineering workflow for long-running Codex tasks.",
+  "author": {
+    "name": "IT Party Pattaya",
+    "url": "https://github.com/itpartypattaya"
+  },
+  "homepage": "https://github.com/itpartypattaya/truedev-workflow",
+  "repository": "https://github.com/itpartypattaya/truedev-workflow",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "lifecycle",
+    "planning",
+    "gates",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TrueDev Workflow",
+    "shortDescription": "Gated planning and delivery for long Codex tasks.",
+    "longDescription": "Turn a specification into durable project artifacts, then deliver each vertical slice through scoped planning, implementation, verification, review, and explicit approval gates.",
+    "developerName": "IT Party Pattaya",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/itpartypattaya/truedev-workflow",
+    "defaultPrompt": [
+      "Turn this specification into an approved delivery plan.",
+      "Start the next planned slice with lifecycle gates.",
+      "Show the current TrueDev workflow status."
+    ]
+  }
+}

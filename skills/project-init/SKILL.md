@@ -1,159 +1,100 @@
 ---
 name: project-init
-description: Framework for creating project documentation from specs — reviews, research, architecture, planning, task decomposition into slices, and optional Jira sync. Triggers on "storm the spec", "analyze spec", "project init", "init project from spec", "проанализируй ТЗ", "разбери ТЗ", "создай документацию по ТЗ", or when user wants to turn a spec into structured project documentation. Also use when user asks to "break down a spec", "create PRD from spec", "plan implementation from requirements", or any workflow that converts a specification into actionable project docs with phases.
-user-invocable: true
-disable-model-invocation: false
-allowed-tools: Agent, Read, Write, Edit, Bash, Glob, Grep
-argument-hint: "[start <spec-file> [--from <phase>]|status|complete <phase>|recover]"
+description: Turn a product or engineering specification into durable requirements, a PRD, architecture decisions, an implementation plan, and dependency-ordered vertical slices. Use whenever the user asks Codex to analyze a spec or ТЗ, initialize a project from requirements, create a PRD or architecture plan, decompose a project into slices, or prepare structured implementation documentation. Do not use for implementing an already-approved slice; use lifecycle for that.
+compatibility: Requires Python 3.9 or newer. Git is recommended for repository-root discovery and auditability.
 ---
 
-# Project Init
+# TrueDev Project Init
 
-## Routing
+Convert an input specification into an approved, implementation-ready contract. Decisions live in
+files; conversation context is not the source of truth.
 
-**`status` (or no arguments):** execute INLINE — read `docs/spec-state.json` and display the phase table. Do NOT launch an agent. See "Status Display" below.
+## Locate the bundled runner
 
-This skill's directory (its reference files live here) — resolved at runtime: !`echo ${CLAUDE_SKILL_DIR}`
+Resolve the plugin root by walking two directories up from this `SKILL.md`, then use:
 
-**All other commands** (`start`, `complete`, `recover`): launch `Agent(general-purpose)` with the prompt below. Replace `SKILL_DIR` with the absolute path printed just above:
-
-```
-Read the project-init skill:
-- Commands and rules: SKILL_DIR/SKILL.md (from "## Agent Instructions")
-- Phase execution details: SKILL_DIR/references/phases.md (read ONLY the active phase section)
-
-Execute command: $ARGUMENTS
-State file: docs/spec-state.json
-Project root: $CWD
-
-Read existing docs/ artifacts for context before acting.
-Follow all instructions. When you hit a user gate, return findings, options, and what needs discussion. Be concise.
+```text
+<PLUGIN_ROOT>/scripts/truedev_workflow.py
 ```
 
-If the agent returns an error, display it without re-running.
+Use `python3` on macOS/Linux and `py -3` on Windows. Never edit
+`.truedev-workflow/project-init.json` directly.
 
-## Status Display
+## Route the request
 
-Read `docs/spec-state.json`. If missing: "No active spec analysis. Use `/bergant-workflow:project-init start <spec-file>` to begin."
+- **status or no explicit action:** run `project-init status` and make no changes.
+- **start `<spec>`:** inspect the spec and existing docs, then initialize state.
+- **approve `<PHASE>`:** only after the latest user message explicitly approves the exact phase,
+  run `project-init approve --phase <PHASE> --user-confirmed`.
+- **continue/resume:** validate state and read only the active phase in `references/phases.md`.
+- **recover:** infer nothing silently. Compare existing artifacts with the phase contracts, present a
+  proposed reconstruction, and wait for confirmation before writing state.
 
-Display formatted table:
-- Each phase with status (pending, in_progress, completed)
-- Current phase highlighted
-- User gates marked
-- Next action needed
+## Start
 
----
+1. Run `<PYTHON> <RUNNER> --help` and stop if the runner cannot start. Do not create active state when
+   hook enforcement and validated transitions would be unavailable.
+2. Read applicable `AGENTS.md`, the specification, and existing `docs/` artifacts.
+3. If a target artifact exists, show the conflict and obtain permission before overwriting or
+   materially restructuring it.
+4. Ensure `.truedev-workflow/` is ignored by Git. Refuse tracked or potentially committable state.
+5. Run:
 
-## Agent Instructions
-
-You manage the spec-to-documentation framework. State persists in `docs/spec-state.json`.
-
-**Core principle:** Be interactive. Present options, trade-offs, recommendations. Ask the user to choose. Never make significant decisions silently.
-
-**Advisory role:** Act as a **senior product manager** during PRD and a **senior architect** during ARCHITECTURE. Don't just document what the user said — analyze their needs deeper, suggest improvements they haven't considered, identify blind spots, and proactively propose solutions. Guide the user like a seasoned expert who's built similar systems before.
-
-**Context management:** After completing any heavy phase, suggest `/compact` to free context. State and docs are persisted — nothing is lost.
-
-**Graceful degradation:** Some phases use optional integrations (WebSearch, `/toxic-opinion`, Jira MCP). If a tool or skill is unavailable, skip that step, note it was skipped in the output docs, and continue. Never block a phase on a missing optional tool.
-
-## Commands
-
-### `start <spec> [--from <phase>]` — Initialize
-
-`<spec>` can be: file path, inline text, or nothing (will ask).
-`--from <phase>` optionally starts from a later phase (case-insensitive). Use when the user already has artifacts for earlier phases.
-
-1. Check if `docs/spec-state.json` exists with incomplete phases. If so, warn and ask to override.
-2. Read the spec:
-   - File path → Read tool
-   - Inline text → use as-is
-   - Nothing provided → ask user to provide spec
-3. If `--from` is specified:
-   - Map required docs per phase: PRD needs `docs/REQUIREMENTS.md`; ARCHITECTURE needs REQUIREMENTS + `docs/prd.md`; PLANNING needs all three; etc.
-   - Verify the required docs exist for all prior phases
-   - If docs are missing, warn and ask user to provide them or start from the beginning
-   - Mark all prior phases as `completed` (with note: "pre-existing")
-4. `mkdir -p docs/plan`
-5. Create `docs/spec-state.json`:
-
-```json
-{
-  "version": 2,
-  "spec": "<source>",
-  "project": "<inferred name>",
-  "startedAt": "<ISO>",
-  "currentPhase": "INPUT_VALIDATION",
-  "config": {},
-  "phases": {
-    "INPUT_VALIDATION": { "status": "in_progress", "gate": "user", "gateDescription": "Confirm spec is sufficient" },
-    "PRD": { "status": "pending", "gate": "user", "gateDescription": "Approve product requirements" },
-    "ARCHITECTURE": { "status": "pending", "gate": "user", "gateDescription": "Approve architecture and tech decisions" },
-    "PLANNING": { "status": "pending", "gate": "user", "gateDescription": "Approve development phases" },
-    "DECOMPOSITION": { "status": "pending", "gate": "user", "gateDescription": "Approve task slices (optional Jira sync after)" },
-    "FINALIZE": { "status": "pending", "gate": "auto" }
-  }
-}
+```text
+python3 <RUNNER> project-init start --project "<name>" --spec "<source>"
 ```
 
-The `config` object stores runtime settings acquired during phases (e.g., `jiraCloudId`, `jiraProjectKey`).
+6. Execute `INPUT_VALIDATION` immediately, write the proposed requirements, present open questions,
+   then open its gate.
 
-6. Execute the starting phase immediately (see `references/phases.md`).
+## Transition commands
 
-### `complete <phase>` — Confirm user gate
+```text
+python3 <RUNNER> project-init status
+python3 <RUNNER> project-init validate
+python3 <RUNNER> project-init finish --phase FINALIZE
+python3 <RUNNER> project-init gate --phase <USER_PHASE>
+python3 <RUNNER> project-init approve --phase <USER_PHASE> --user-confirmed
+python3 <RUNNER> project-init archive
+```
 
-Phase name matching is **case-insensitive** (`prd`, `PRD`, `Prd` all work).
+Before opening a gate, ensure the durable artifact contains the decisions and evidence the user is
+approving. Once a gate is open, mutating repository tools are blocked by the optional hooks.
 
-1. Read state. Verify `<phase>` matches `currentPhase`.
-2. If the completed phase's docs contain open questions or assumptions, ask the user whether any need updating before proceeding. Update docs with their answers.
-3. Mark phase `completed` with timestamp.
-4. Advance `currentPhase` to next phase, set it `in_progress`.
-5. Save state.
-6. Execute the next phase (see `references/phases.md`).
-7. If next phase has user gate → present findings and STOP.
+## Phase order and artifacts
 
-### `recover` — Reconstruct state from existing files
+1. `INPUT_VALIDATION` → `docs/REQUIREMENTS.md`
+2. `PRD` → `docs/prd.md`
+3. `ARCHITECTURE` → `docs/architecture.md` and UI design artifacts only when relevant
+4. `PLANNING` → `docs/plan/phase-N.md`
+5. `DECOMPOSITION` → `docs/plan/slice-NNN-*.md`
+6. `FINALIZE` → concise `AGENTS.md` integration and ignore rules
 
-1. Scan `docs/` for: REQUIREMENTS.md, prd.md, architecture.md, plan/phase-*.md.
-2. Infer which phases are complete based on file existence and content.
-3. Present findings as a table, ask user to confirm.
-4. On confirmation: write `docs/spec-state.json`.
+Read only the active section in `references/phases.md`. Use
+`references/artifact-templates.md` when creating a new artifact; preserve an established project
+format when one already exists.
 
----
+## Decision and research rules
 
-## Critical Rules
+- Be advisory, not prescriptive. Present options, trade-offs, and a recommendation grounded in the
+  actual product, team, repository, and operating constraints.
+- Do not hardcode a framework, architecture style, package manager, design system, test framework,
+  deployment provider, or default branch.
+- Verify versions only when a version decision is required. Use current primary documentation and
+  record the verification date; avoid “latest” without a source.
+- For legal, privacy, security, financial, medical, or regulatory requirements, research current
+  authoritative sources, cite them, identify jurisdiction and date, and label remaining professional
+  sign-off. Do not convert a web summary into legal approval.
+- Use optional external research only when it materially improves a decision and is within the user's
+  request. Missing tools are an evidence limitation, not permission to invent facts.
+- A frontend project needs appropriate accessibility, responsive behavior, component states, and
+  visual verification. It does not automatically need React, Tailwind, shadcn, Storybook, or a large
+  multi-agent design ceremony.
+- Use subagents only when host policy and the user's request permit them. The workflow must remain
+  usable by one Codex agent.
 
-1. **Never skip phases** unless `--from` is used at start. Order: INPUT_VALIDATION → PRD → ARCHITECTURE → PLANNING → DECOMPOSITION → FINALIZE.
-2. **Never advance past user gates** without explicit `/bergant-workflow:project-init complete <phase>`.
-3. **Always update `docs/spec-state.json`** after every phase transition. State file is source of truth.
-4. **Always read state file and existing docs** before acting. Never rely on conversation history.
-5. **Sub-agents for heavy work.** Web research, toxic opinion, Jira ops — always via Agent to protect context.
-6. **Jira only via agents.** Never call `mcp__atlassian__*` in main context. Use jira-ops skill patterns.
-7. **Interactive by default.** Multiple options → present trade-offs, ask user. Don't decide silently.
-8. **MVP mindset.** Core flow first, polish last. Flag post-MVP ideas but don't over-plan them.
-9. **Suggest `/compact`** after heavy phases (PRD, ARCHITECTURE, PLANNING, DECOMPOSITION).
-10. **Never overwrite docs** without asking. If updating, show diff or ask permission first.
-11. **Optional integrations are opt-in.** Always ask before web research or toxic-opinion. If tool unavailable, skip and note in docs.
-12. **Files are the contract.** All decisions must be captured in docs before completing a phase. Conversation is ephemeral, files persist.
-13. **Graceful degradation.** If an optional tool is unavailable, skip that step and continue — never block the workflow.
-14. **Always use current LTS/stable versions.** When choosing technologies, always pick the latest LTS (for Node.js, PostgreSQL) or latest stable release (for React, frameworks, libraries). Never use outdated versions for new projects — verify current versions via web search or documentation before committing to a version number.
+## Finalize
 
-## State File
-
-`docs/spec-state.json` — in the project's `docs/` directory.
-
-- `version` — schema version (current: 2) for future migration compatibility
-- `config` — runtime settings acquired during phases (Jira Cloud ID, project key, etc.)
-- `phases` — status of each phase with gate info
-
-## Optional dependencies
-
-These power specific phases. The first time a phase needs one and it's missing, offer the user a
-**one-time choice — install it now or skip** (note the skip in the output docs). Never hard-block
-a phase on a missing optional tool.
-
-| Dependency | Phase | If missing |
-|------------|-------|-----------|
-| A second-opinion skill driving an external model (e.g. `toxic-opinion` + Codex CLI — not bundled) | second opinion in every phase | skip with a note in the phase output |
-| WebSearch | PRD market / legal research | skip, note in docs |
-| Jira MCP (`mcp__atlassian__*`) | DECOMPOSITION → optional Jira sync | user declines or MCP missing → skip Jira; slices stay in `docs/plan/` |
-| Design agents + `interface-design` / Vercel / `frontend-design` skills (none bundled) | ARCHITECTURE design system | run the same steps via `general-purpose` agents, record the fallback in the docs |
+Merge a concise project-specific section into `AGENTS.md`; do not overwrite unrelated instructions.
+Ensure `.truedev-workflow/` and secrets are ignored without duplicating patterns. Finish FINALIZE,
+archive the receipt, and hand the first approved slice to `$lifecycle`.

@@ -1,134 +1,94 @@
-# Lifecycle Step Execution
+# Lifecycle step playbook
 
-Read only the section for the current step. Do not load the entire file into context.
+Read only the active section. The runner owns state transitions; these instructions own the work and
+the evidence presented to the user.
 
 ## CONTEXT_CHECK
 
-- Exists solely to enforce context cleanup before real work begins.
-- On `start`: state file created with `awaitingCompact: true`. PreToolUse(Agent) hook blocks agent launches.
-- **Create task branch** from master: `git checkout master && git pull && git checkout -b <task-key-lowercase>`. Update `"branch"` in state.
-- After `/compact`: SessionStart(compact) hook clears `awaitingCompact`.
-- On resume after compact: mark CONTEXT_CHECK completed, advance to SCOPE.
-  - If SCOPE already `"completed"` (via `--skip-scope`): skip to PLAN and begin executing.
-  - If SCOPE `"pending"`: advance to SCOPE (user gate — present requirements and STOP).
+1. Read applicable `AGENTS.md`, the selected slice, repository status, and current branch.
+2. Run the bundled `git-preflight --require-clean` before branch or worktree changes.
+3. Confirm the slice dependencies are completed and the task does not overlap unrelated work.
+4. Record any unavailable validation layers. Do not treat them as passed.
+5. Finish `CONTEXT_CHECK` through the runner.
 
-## SCOPE (gate: user)
+## SCOPE — user gate
 
-- Read task description from `docs/plan/slice-*.md` (find the relevant slice file for this task).
-- Present: summary, scope, acceptance criteria.
-- Provide AI perspective: challenges, ambiguities, questions.
-- **Run `/toxic-opinion` for a second opinion on the scope** (default ON). Frame the Codex prompt around the task scope, key decisions, and potential risks. Present Codex findings alongside your own. If no second-opinion skill is available, note the skip and continue with your own analysis. Never hard-block on it.
-- **STOP HERE.** Display requirements, AI perspective, Codex second opinion, and: `When ready: /bergant-workflow:lifecycle complete SCOPE`
-- Do NOT proceed to PLAN until user confirms.
-
-**On `/bergant-workflow:lifecycle complete SCOPE` (MANDATORY state writes — these are standard fields, see `state-schema.md`):**
-
-Write to `.lifecycle-state.json`:
-- `scopeApprovedAt`: current ISO timestamp
-- `codexOpinionIncorporated`: `true` if `/toxic-opinion` ran AND its findings merged into the approved scope; `false` if Codex timed out or user rejected its input
-- `codexFindings`: array of short snake_case semantic tags (≤4 words each) distilled from Codex's second opinion — one tag per implementable decision (e.g., `"schema_enum_fix_required"`, `"split_transactions"`, `"pii_redaction"`). These are anchors for post-compact context recovery in PLAN.
-- `scopeNotes.approvedScope`: bullet-list array of concrete scope items the user confirmed — becomes the source of truth for PLAN and IMPLEMENT.
-- `steps.SCOPE.status`: `"completed"`
-
-Then advance `currentStep` to `"PLAN"` and set `steps.PLAN.status` to `"in_progress"`.
+1. Read the slice and relevant contracts or specifications.
+2. Present the intended outcome, acceptance criteria, out-of-scope items, risks, and unresolved choices.
+3. Separate confirmed requirements from assumptions and recommendations.
+4. If current or niche facts matter, verify them from primary sources and preserve citations in the
+   durable artifact.
+5. Open the SCOPE gate and stop. Approval must name or clearly refer to SCOPE.
 
 ## PLAN
 
-- Read task description from `docs/plan/slice-*.md`.
-- Explore related code via Agent(Explore).
-- **Component inventory (MANDATORY for UI tasks):** For each component: new or existing? tokens needed? variants/states? Can reuse existing tokens?
-- Present plan to user. When approved:
-  - Update TaskList: replace placeholder `[IMPLEMENT]` task with individual subtasks `[IMPLEMENT] S1: <title>`, etc.
-  - Save component inventory to `"components"` array in COMPONENTS step.
-- **Set `"awaitingCompact": true`**.
-- Display: `✅ PLAN completed. 🧹 Run /compact before continuing.`
-- Do NOT start COMPONENTS.
+1. Inspect the implementation surface without editing it first.
+2. Produce an ordered plan with owned files, verification for each step, rollback concerns, and
+   external actions that require separate authority.
+3. For UI work, inventory new and existing components, tokens, states, accessibility, responsive
+   behavior, and visual verification. Reuse the project's established design system.
+4. For data or schema work, document migration, compatibility, rollback, and immutable-data rules.
+5. Synchronize the Codex plan, finish PLAN, and ask the user to compact before implementation. The
+   runner sets `awaiting_compact`; the SessionStart hook clears it after a real compact event.
 
-## COMPONENTS (gate: user)
+## COMPONENTS — user gate
 
-**Skip condition:** If task has NO UI components, auto-complete and advance to IMPLEMENT.
+For UI work, implement or update shared components and their repository-native visual examples or
+tests before page integration. Cover relevant loading, empty, populated, error, disabled, and
+read-only states plus keyboard and screen-reader behavior. Present render or test evidence.
 
-**For UI tasks:**
-1. Read component inventory from state.
-2. For each NEW component:
-   a. Check/generate design tokens.
-   b. Build component (shadcn/ui primitives, all states, accessibility, responsive).
-   c. Create `.stories.tsx` (story per variant, per state, responsive).
-   d. Update status to `"completed"` in state.
-3. For EXISTING components: update + update story. Mark `"completed"`.
-4. Run Storybook build.
-5. **STOP HERE.** List new/updated components, tokens. Ask user to review in Storybook.
-6. Do NOT proceed to IMPLEMENT until approved.
+For non-UI work, document that there is no component surface and ask the user to approve skipping
+this gate. Do not pretend the gate does not exist.
+
+Open the COMPONENTS gate and stop.
 
 ## IMPLEMENT
 
-- For each subtask in order:
-  - Update subtask status to `in_progress`.
-  - Launch Agent(general-purpose) with focused instructions.
-  - On return: update subtask to `completed`.
-- When all done: `npm run build` + `npm run lint`.
-- If pass: mark IMPLEMENT completed, advance.
-- If fail: fix, re-check.
+1. Work through the approved plan in small, reviewable changes.
+2. Preserve user-owned changes and agreed file ownership.
+3. Run focused checks after each meaningful unit rather than waiting for the end.
+4. If scope must change, stop and return to a user decision; do not silently expand it.
+5. Finish IMPLEMENT only after the implementation checks available in the repository pass.
 
-## VERIFY (gate: user)
+## VERIFY — user gate
 
-- Run: `npm run build`, `npm run lint`.
-- Display test plan: task-specific manual checks (user-facing checklist, not developer checklist).
-- **STOP HERE.** `When done: /bergant-workflow:lifecycle complete VERIFY`
-- Do NOT proceed further.
+1. Run discovered build, lint, formatting, type, migration, or package checks relevant to the task.
+2. Provide a short user-facing manual verification checklist.
+3. State exactly what was not executed and why.
+4. Open the VERIFY gate and wait for the user's manual-test result or explicit acceptance of the
+   documented limitation.
 
 ## TEST
 
-- Write unit tests (Vitest) for new business logic.
-- Write E2E tests (Playwright) if UI changed.
-- Run `npm run test` (and `npm run test:e2e` if applicable).
-- Mark TEST completed, advance.
+1. Add or update tests in the project's existing frameworks.
+2. Cover the business logic and regressions introduced by the slice. Add integration or E2E coverage
+   only where that layer exists and materially protects the behavior.
+3. Run the narrow tests first, then the repository's broader relevant suite.
+4. Record commands, outcomes, and unavailable layers. Finish TEST when evidence is reproducible.
 
-## REVIEW (gate: user)
+## REVIEW — user gate
 
-- **Pre-commit safety check (BEFORE staging — do not skip).** Make sure no secrets or
-  transient files are about to be committed:
-  - Inspect what would be staged: `git status --porcelain` and `git diff --cached --name-only`.
-  - **Block-list:** `.env`, `.env.*` (except `.env.example`), `*.key`, `*.pem`, `secrets/`,
-    `.lifecycle-state.json`, `docs/spec-state.json`, `.claude/`, and any file containing
-    obvious credentials (API keys, tokens, connection strings, private keys).
-  - For each match: verify it is listed in `.gitignore`. If not → add it to `.gitignore`.
-    If it is already tracked → `git rm --cached <file>` so it stops being committed.
-  - Scan the staged diff for inline secrets (high-entropy strings, `password=`, `Bearer `,
-    `postgres://...:...@`). If found → STOP, tell the user, do NOT commit until resolved.
-  - Only proceed to commit once the working tree is clean of secrets/temp files.
-- **Then: commit all changes.** Submitting for review === commit. Stage all changed files and create a commit on the feature branch. Do NOT push.
-- Launch review Agent AND, if a dual-review skill such as `/toxic-review` is available, run it in parallel (default ON). If not available, proceed with the single review Agent only — note which was used.
-- toxic-review reviews the branch diff — pass base branch as argument (e.g., `/toxic-review master`).
-- Present findings: MUST FIX / SHOULD FIX / NIT.
-- **STOP.** Ask user which fixes to apply.
-
-**On `/bergant-workflow:lifecycle complete REVIEW`:**
-- Apply fixes, commit, build/lint, mark completed, advance.
+1. Inspect the complete task diff before staging anything.
+2. Scan for secrets, transient state, generated noise, and unrelated files.
+3. Review correctness, authorization, data integrity, concurrency, error handling, observability,
+   performance, compatibility, and test gaps.
+4. Report findings as P0/P1/P2 with exact files and evidence. Do not hide findings because tests pass.
+5. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
+   verification before approval transition.
 
 ## DOCUMENT
 
-- Update `MEMORY.md` with decisions and learnings (if any).
-- Check `design-issues.md` for items to close.
-- Update `CLAUDE.md`/`AGENTS.md` if project structure changed.
-- Mark completed, advance.
+Update durable repository documentation only when behavior, commands, architecture, or operational
+contracts changed. Prefer `AGENTS.md` for Codex repository instructions. Do not write personal/global
+memory unless the user explicitly asks. Finish DOCUMENT after docs and implementation agree.
 
-## CLOSE (gate: user)
+## CLOSE — user gate
 
-**Phase 1 — Create PR:**
-- Run final: `npm run build`, `npm run test`.
-- Commit remaining changes (if any).
-- Push branch to remote.
-- Create PR: `gh pr create --base <base> --title "..." --body "..."`. If `gh` is unavailable,
-  fall back to GitHub MCP `create_pull_request`.
-- **STOP.** Show PR link. Ask user to review.
-
-**On `/bergant-workflow:lifecycle complete CLOSE`:**
-1. Merge PR: `gh pr merge <number> --squash --delete-branch`. If `gh` is unavailable, fall back
-   to GitHub MCP `merge_pull_request` and delete the remote branch.
-2. `git checkout master && git pull`.
-3. `git branch -d <branch>`.
-4. `rm .lifecycle-state.json`.
-5. **Clean up TaskList:** Delete all lifecycle tasks (`[CONTEXT_CHECK]`, `[SCOPE]`, `[PLAN]`, `[COMPONENTS]`, `[IMPLEMENT]`, `[VERIFY]`, `[TEST]`, `[REVIEW]`, `[DOCUMENT]`, `[CLOSE]`) via `TaskUpdate` with `status: "deleted"`.
-6. Update task status in `docs/plan/slice-*.md` (change ⏳ to ✅).
-7. Suggest: `/bergant-workflow:lifecycle next`.
+1. Run the final relevant checks and `git-preflight`.
+2. Show the exact intended commit paths and any proposed push/PR/merge action.
+3. Do not stage all files. Do not push, create or merge a PR, delete a branch, or clean a worktree
+   without authority for that action.
+4. Open CLOSE and wait for explicit approval.
+5. After the approved close actions, approve CLOSE, change only this slice's header from
+   `Status: pending` to `Status: completed`, and archive the lifecycle receipt. Individual task
+   checkboxes may be updated earlier, but the slice header changes only after CLOSE.

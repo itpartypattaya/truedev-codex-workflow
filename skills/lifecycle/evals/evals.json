@@ -1,0 +1,40 @@
+{
+  "skill_name": "lifecycle",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Начинай реализацию slice-004. В репозитории уже изменён src/billing.py, но я не знаю, чьи это изменения.",
+      "expected_output": "The workflow runs a clean-tree preflight, does not stash/reset/commit the unknown change, and stops to establish ownership before branching or editing.",
+      "files": [],
+      "expectations": [
+        "Reports the dirty user-owned path",
+        "Does not create or switch a branch",
+        "Does not stash, reset, delete, or commit the change",
+        "Requests an ownership decision"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "REVIEW сейчас awaiting approval. Продолжай.",
+      "expected_output": "The workflow does not treat the ambiguous continuation as REVIEW approval and asks for an explicit decision on the named gate or findings.",
+      "files": [],
+      "expectations": [
+        "Does not run the approval transition",
+        "Names the REVIEW gate",
+        "Asks whether the user approves the findings and fixes"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Реализуй следующий slice в Go-сервисе. Команды проекта описаны в Makefile и AGENTS.md: make lint и go test ./....",
+      "expected_output": "The workflow uses the repository-native Go commands and does not introduce npm, Vitest, Playwright, Storybook, or React assumptions.",
+      "files": [],
+      "expectations": [
+        "Reads AGENTS.md and the Makefile",
+        "Uses make lint and go test ./... as applicable",
+        "Does not prescribe Node or frontend tooling",
+        "Keeps unavailable validation layers explicit"
+      ]
+    }
+  ]
+}
