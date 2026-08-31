@@ -4,10 +4,6 @@ TrueDev Workflow is a native Codex plugin for long product and engineering tasks
 specification into durable project documents, then delivers one vertical slice at a time through
 explicit scope, verification, review, and closeout gates.
 
-This repository is a security and portability rewrite of
-[`UnBergant/bergant-workflow`](https://github.com/UnBergant/bergant-workflow). The source audit and
-fix mapping are in [`docs/audit-2026-08-31.md`](docs/audit-2026-08-31.md).
-
 ## What is included
 
 | Component | Purpose |
