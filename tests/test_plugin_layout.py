@@ -34,7 +34,8 @@ class PluginLayoutTests(unittest.TestCase):
             for group in event:
                 for handler in group["hooks"]:
                     self.assertIn("$PLUGIN_ROOT", handler["command"])
-                    self.assertIn("%PLUGIN_ROOT%", handler["commandWindows"])
+                    self.assertIn("$env:PLUGIN_ROOT", handler["commandWindows"])
+                    self.assertNotIn("%PLUGIN_ROOT%", handler["commandWindows"])
                     self.assertTrue(handler["commandWindows"].startswith("python "))
 
     def test_skills_have_matching_names_and_stay_under_500_lines(self) -> None:

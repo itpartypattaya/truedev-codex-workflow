@@ -117,7 +117,7 @@ class WorkflowTests(unittest.TestCase):
         (state_dir / workflow.LIFECYCLE_FILE).write_text("{not-json", encoding="utf-8")
         code, output, _ = self.hook(
             "pre-tool",
-            {"cwd": str(self.root), "tool_name": "Bash", "tool_input": {"command": "git status"}},
+            {"cwd": str(self.root), "tool_name": "apply_patch", "tool_input": {"command": "patch"}},
         )
         self.assertEqual(code, 0)
         decision = json.loads(output)
@@ -188,6 +188,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(archives), 1)
         self.assertEqual(archives[0].read_bytes(), original)
 
+    def test_detached_head_status_and_recovery_remain_available(self) -> None:
+        self.start_lifecycle()
+        git(self.root, "checkout", "--detach", "HEAD")
+
+        code, output, error = self.cli("lifecycle", "status")
+        self.assertEqual(code, 0, error)
+        self.assertIn("active: (detached); MISMATCH", output)
+        self.assertIn("CONTEXT_CHECK", output)
+
+        _, denied, _ = self.hook(
+            "pre-tool",
+            {"cwd": str(self.root), "tool_name": "apply_patch", "tool_input": {"command": "patch"}},
+        )
+        reason = json.loads(denied)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("branch mismatch", reason)
+        self.assertNotIn("state is invalid", reason)
+
+        code, _, error = self.cli(
+            "lifecycle", "recover", "--accept-current-branch", "--user-confirmed"
+        )
+        self.assertEqual(code, 0, error)
+        state = workflow.load_state(self.root, "lifecycle")
+        self.assertEqual(state["branch"], workflow.DETACHED_HEAD)
+
+    def test_lifecycle_start_rejects_detached_head_with_start_specific_message(self) -> None:
+        git(self.root, "checkout", "--detach", "HEAD")
+        code, _, error = self.cli("lifecycle", "start", "--task", "fixture", "--base", "main")
+        self.assertEqual(code, 2)
+        self.assertIn("lifecycle start", error)
+
     def test_non_ui_components_can_be_recorded_not_applicable(self) -> None:
         self.start_lifecycle()
         self.assertEqual(self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")[0], 0)
@@ -237,6 +267,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any("missing dependency slice-999" in item for item in problems))
         self.assertTrue(any("dependency cycle" in item for item in problems))
 
+    def test_slice_validator_reports_non_utf8_as_workflow_error(self) -> None:
+        plan = self.root / "docs" / "plan"
+        plan.mkdir(parents=True)
+        (plan / "slice-001-binary.md").write_bytes(b"Depends on: none\n\xff")
+        code, _, error = self.cli("project-init", "validate-slices")
+        self.assertEqual(code, 2)
+        self.assertIn("cannot read slice file", error)
+        self.assertNotIn("Traceback", error)
+
     def test_user_gate_blocks_mutation_but_allows_exact_approval_command(self) -> None:
         self.start_lifecycle()
         self.assertEqual(self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")[0], 0)
@@ -269,6 +308,45 @@ class WorkflowTests(unittest.TestCase):
             "deny",
         )
 
+    def test_user_gate_allows_narrow_read_only_commands(self) -> None:
+        self.start_lifecycle()
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        runner = ROOT / "scripts" / "truedev_workflow.py"
+        commands = (
+            "git status --short --branch",
+            "git diff --cached --stat",
+            "git log --oneline -n 3",
+            "git show --stat HEAD",
+            "cat README.md",
+            "Get-Content -Raw -LiteralPath README.md",
+            f'python "{runner}" git-preflight',
+            f'python "{runner}" project-init validate-slices --plan-dir docs/plan',
+        )
+        for command in commands:
+            _, output, _ = self.hook(
+                "pre-tool",
+                {"cwd": str(self.root), "tool_name": "Bash", "tool_input": {"command": command}},
+            )
+            self.assertEqual(output, "", command)
+
+        for command in (
+            "git reset --hard",
+            "cat ../outside.txt",
+            "cat .env",
+            "git show HEAD:.env",
+            "git diff --output=result.txt",
+        ):
+            _, output, _ = self.hook(
+                "pre-tool",
+                {"cwd": str(self.root), "tool_name": "Bash", "tool_input": {"command": command}},
+            )
+            self.assertEqual(
+                json.loads(output)["hookSpecificOutput"]["permissionDecision"],
+                "deny",
+                command,
+            )
+
     def test_plan_completion_requires_real_compaction_before_mutation(self) -> None:
         self.start_lifecycle()
         self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
@@ -293,6 +371,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(state)
         self.assertFalse(state["awaiting_compact"])
 
+    def test_compact_gate_has_explicit_manual_release(self) -> None:
+        self.start_lifecycle()
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        self.cli("lifecycle", "approve", "--step", "SCOPE", "--user-confirmed")
+        self.cli("lifecycle", "finish", "--step", "PLAN")
+        runner = ROOT / "scripts" / "truedev_workflow.py"
+        command = f'python "{runner}" lifecycle release-compact --user-confirmed'
+        _, allowed, _ = self.hook(
+            "pre-tool",
+            {"cwd": str(self.root), "tool_name": "Bash", "tool_input": {"command": command}},
+        )
+        self.assertEqual(allowed, "")
+        self.assertEqual(self.cli("lifecycle", "release-compact")[0], 2)
+        code, _, error = self.cli("lifecycle", "release-compact", "--user-confirmed")
+        self.assertEqual(code, 0, error)
+        state = workflow.load_state(self.root, "lifecycle")
+        self.assertFalse(state["awaiting_compact"])
+        self.assertTrue(any(item["action"] == "release-compact" for item in state["history"]))
+
     def test_non_compact_session_start_does_not_clear_compact_gate(self) -> None:
         self.start_lifecycle()
         self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
@@ -305,7 +403,7 @@ class WorkflowTests(unittest.TestCase):
             {"cwd": str(self.root), "hook_event_name": "SessionStart", "source": "resume"},
         )
         self.assertEqual(code, 0)
-        self.assertIn("continue", json.loads(output))
+        self.assertEqual(output, "")
         state = workflow.load_state(self.root, "lifecycle")
         self.assertIsNotNone(state)
         self.assertTrue(state["awaiting_compact"])
@@ -320,6 +418,27 @@ class WorkflowTests(unittest.TestCase):
         context = json.loads(output)["hookSpecificOutput"]["additionalContext"]
         self.assertNotIn(malicious, context)
         self.assertIn("schema-validated", context)
+
+    def test_slice_is_validated_and_restored_in_status_and_compact_context(self) -> None:
+        slice_ref = "docs/plan/slice-004-billing.md"
+        code, _, error = self.cli(
+            "lifecycle", "start", "--task", "fixture", "--slice", slice_ref, "--base", "main"
+        )
+        self.assertEqual(code, 0, error)
+        self.assertIn(f"slice: {slice_ref}", self.cli("lifecycle", "status")[1])
+        _, output, _ = self.hook(
+            "session-start",
+            {"cwd": str(self.root), "hook_event_name": "SessionStart", "source": "compact"},
+        )
+        context = json.loads(output)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f"slice={slice_ref}", context)
+
+    def test_invalid_slice_reference_is_rejected(self) -> None:
+        code, _, error = self.cli(
+            "lifecycle", "start", "--task", "fixture", "--slice", "../outside.md", "--base", "main"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("docs/plan/slice-*.md", error)
 
     def test_schema_rejects_skipped_step(self) -> None:
         self.start_lifecycle()
@@ -406,6 +525,25 @@ class WorkflowTests(unittest.TestCase):
         code, output, _ = self.cli("git-preflight")
         self.assertEqual(code, 0, output)
         self.assertTrue(json.loads(output)["ok"])
+
+    def test_common_secret_file_names_are_sensitive(self) -> None:
+        sensitive = (
+            "config/secrets.yaml",
+            "config/secrets.json",
+            "app/credentials.json",
+            "aws/credentials",
+            "deploy/id_rsa",
+            "serviceAccount.json",
+            "server.pfx",
+            "server.p12",
+            "store.jks",
+            "store.keystore",
+            ".npmrc",
+            ".pypirc",
+        )
+        for path in sensitive:
+            self.assertTrue(workflow.is_sensitive_path(path), path)
+        self.assertFalse(workflow.is_sensitive_path("server.crt"))
 
     def test_git_preflight_detects_rename_to_sensitive_path(self) -> None:
         source = self.root / "safe.txt"

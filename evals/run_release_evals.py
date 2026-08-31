@@ -52,6 +52,11 @@ def prepare_fixture(workspace: Path) -> Path:
     )
     (fixture / "Makefile").write_text("lint:\n\t@echo lint\n\ntest:\n\tgo test ./...\n", encoding="utf-8")
     (fixture / "src" / "billing.py").write_text("# existing unknown user change\n", encoding="utf-8")
+    (fixture / "go.mod").write_text("module example.invalid/truedev-eval\n\ngo 1.22\n", encoding="utf-8")
+    (fixture / "src" / "billing.go").write_text(
+        "package billing\n\nfunc RetryKey(chargeID string) string { return chargeID }\n",
+        encoding="utf-8",
+    )
     (fixture / "docs" / "plan" / "slice-004-billing.md").write_text(
         "# Slice 004\n\nAdd billing validation without changing unrelated work.\n",
         encoding="utf-8",
@@ -198,6 +203,14 @@ def completed_run(workspace: Path, eval_id: str, configuration: str) -> bool:
     return timing.get("exit_code") == 0 and timing.get("output_valid") is True and timing.get("completed") is True
 
 
+def select_evals(items: list[dict[str, Any]], eval_id: str | None, limit: int | None) -> list[dict[str, Any]]:
+    if eval_id is not None:
+        items = [item for item in items if item["id"] == eval_id]
+        if not items:
+            raise ValueError(f"unknown --eval-id: {eval_id}")
+    return items[:limit]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -209,11 +222,10 @@ def main(argv: list[str] | None = None) -> int:
     workspace = args.workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     fixture = prepare_fixture(workspace)
-    items = load_evals()[: args.limit]
-    if args.eval_id:
-        items = [item for item in items if item["id"] == args.eval_id]
-        if not items:
-            parser.error(f"unknown --eval-id: {args.eval_id}")
+    try:
+        items = select_evals(load_evals(), args.eval_id, args.limit)
+    except ValueError as exc:
+        parser.error(str(exc))
     configurations = ("with_skill", "without_skill") if args.configuration == "all" else (args.configuration,)
     try:
         for item in items:

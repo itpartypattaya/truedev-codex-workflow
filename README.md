@@ -36,8 +36,6 @@ codex plugin marketplace add itpartypattaya/truedev-codex-workflow --ref main
 codex plugin add truedev-workflow@truedev-workflow
 ```
 
-Before this branch is merged, replace `main` with `codex-native-port` to test the branch build.
-
 Start a new Codex task after installation so the skills and hooks are loaded. Open `/hooks` in Codex
 CLI to review and trust the bundled hook definitions.
 
@@ -131,7 +129,8 @@ python scripts/validate_release.py
 python scripts/package_plugin.py
 ```
 
-The ZIP intentionally excludes marketplace metadata, tests, screenshots, and repository-only docs.
+The ZIP intentionally excludes marketplace metadata, tests, eval definitions/fixtures, screenshots,
+and repository-only docs.
 Skills-only submissions must not declare `interface.screenshots`; the review images under
 `docs/images/` are separate submission/reference assets.
 

@@ -116,7 +116,11 @@ def validate_hooks() -> None:
                 command = handler.get("command")
                 windows = handler.get("commandWindows")
                 require(isinstance(command, str) and command.startswith('python3 "$PLUGIN_ROOT/'), "POSIX hooks must use python3 and PLUGIN_ROOT")
-                require(isinstance(windows, str) and windows.startswith('python "%PLUGIN_ROOT%\\'), "Windows hooks must use python and PLUGIN_ROOT")
+                require(
+                    isinstance(windows, str)
+                    and windows.startswith('python "$env:PLUGIN_ROOT\\'),
+                    "Windows hooks must use python and PowerShell PLUGIN_ROOT syntax",
+                )
                 require("py -3" not in windows, "Windows hook must not assume a registered py launcher")
 
 

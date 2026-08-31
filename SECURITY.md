@@ -22,11 +22,15 @@ change.
 
 - Hook input is accepted as JSON on standard input and schema-checked before use.
 - Repository roots are resolved before state access, and state is bound to the recorded root.
-- State writes are atomic and use restrictive permissions where supported.
+- State writes are atomic, use restrictive permissions where supported, and fsync the containing
+  directory on platforms that allow it.
 - Invalid active state fails closed for matched mutation tools.
-- Compaction injects only allowlisted workflow names, enum values, statuses, and a boolean compact
-  flag. Free-form task, state, and transcript text is not elevated to developer context.
+- Compaction injects only allowlisted workflow names, enum values, statuses, a validated slice path,
+  and a boolean compact flag. Free-form task, state, and transcript text is not elevated to developer context.
 - Approval transitions require the explicit `--user-confirmed` flag after a named user decision.
+- A missing compact event can be bypassed only with an explicit `release-compact --user-confirmed`
+  receipt. Gate-time shell exemptions are limited to narrow read-only commands without chaining or
+  redirection and refuse sensitive paths.
   This is auditable workflow evidence, not cryptographic proof of human identity.
 - The runner does not pull, stage all, push, merge, reset, delete branches, or remove worktrees.
 - The plugin has no network client, telemetry, credential store, or MCP server.

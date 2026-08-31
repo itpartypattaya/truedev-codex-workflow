@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -25,6 +26,8 @@ def load_script(name: str):
 
 def load_eval_script(name: str):
     path = ROOT / "evals" / f"{name}.py"
+    if str(path.parent) not in sys.path:
+        sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
@@ -37,7 +40,7 @@ class ReleaseTests(unittest.TestCase):
     def test_release_contract(self) -> None:
         validator = load_script("validate_release")
         manifest = validator.validate()
-        self.assertEqual(manifest["version"], "1.1.0")
+        self.assertEqual(manifest["version"], "1.1.1")
 
     def test_package_is_deterministic_and_minimal(self) -> None:
         package_module = load_script("package_plugin")
@@ -54,7 +57,32 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("skills/lifecycle/SKILL.md", names)
             self.assertIn("skills/project-init/SKILL.md", names)
             self.assertFalse(any(name.startswith((".git/", ".agents/", "docs/", "tests/", "evals/")) for name in names))
+            self.assertFalse(any("/evals/" in name for name in names))
             self.assertFalse(any(name.endswith((".pyc", ".zip")) for name in names))
+
+    def test_default_package_name_tracks_manifest_version(self) -> None:
+        package_module = load_script("package_plugin")
+        self.assertEqual(package_module.default_output("9.8.7").name, "truedev-workflow-9.8.7.zip")
+
+    def test_eval_selection_filters_before_limit(self) -> None:
+        runner = load_eval_script("run_release_evals")
+        items = [{"id": f"eval-{index}"} for index in range(5)]
+        self.assertEqual(runner.select_evals(items, "eval-4", 2), [{"id": "eval-4"}])
+        with self.assertRaisesRegex(ValueError, "unknown --eval-id"):
+            runner.select_evals(items, "missing", 2)
+
+    def test_eval_fixture_contains_runnable_go_surface(self) -> None:
+        runner = load_eval_script("run_release_evals")
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = runner.prepare_fixture(Path(temp))
+            self.assertTrue((fixture / "go.mod").is_file())
+            self.assertTrue((fixture / "src" / "billing.go").is_file())
+            self.assertTrue((fixture / "src" / "billing.py").is_file())
+
+    def test_empty_metrics_fail_with_a_controlled_error(self) -> None:
+        grader = load_eval_script("grade_release_evals")
+        with self.assertRaisesRegex(RuntimeError, "without completed runs"):
+            grader.metric([])
 
     def test_eval_rerun_cannot_accept_a_stale_response(self) -> None:
         runner = load_eval_script("run_release_evals")
