@@ -6,8 +6,8 @@
     "name": "IT Party Pattaya",
     "url": "https://github.com/itpartypattaya"
   },
-  "homepage": "https://github.com/itpartypattaya/truedev-workflow",
-  "repository": "https://github.com/itpartypattaya/truedev-workflow",
+  "homepage": "https://github.com/itpartypattaya/truedev-codex-workflow",
+  "repository": "https://github.com/itpartypattaya/truedev-codex-workflow",
   "license": "MIT",
   "keywords": [
     "workflow",
@@ -27,7 +27,7 @@
       "Interactive",
       "Write"
     ],
-    "websiteURL": "https://github.com/itpartypattaya/truedev-workflow",
+    "websiteURL": "https://github.com/itpartypattaya/truedev-codex-workflow",
     "defaultPrompt": [
       "Turn this specification into an approved delivery plan.",
       "Start the next planned slice with lifecycle gates.",

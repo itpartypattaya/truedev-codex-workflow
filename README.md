@@ -34,7 +34,7 @@ runner still work, but automatic mutation blocking is absent.
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add itpartypattaya/truedev-workflow --ref main
+codex plugin marketplace add itpartypattaya/truedev-codex-workflow --ref main
 codex plugin add truedev-workflow@truedev-workflow
 ```
 
