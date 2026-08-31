@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 
@@ -13,6 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_script(name: str):
     path = ROOT / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_eval_script(name: str):
+    path = ROOT / "evals" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
@@ -43,6 +54,24 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("skills/project-init/SKILL.md", names)
             self.assertFalse(any(name.startswith((".git/", ".agents/", "docs/", "tests/", "evals/")) for name in names))
             self.assertFalse(any(name.endswith((".pyc", ".zip")) for name in names))
+
+    def test_eval_rerun_cannot_accept_a_stale_response(self) -> None:
+        runner = load_eval_script("run_release_evals")
+        item = {"id": "stale-output", "prompt": "fixture", "assertions": []}
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp) / "workspace"
+            fixture = Path(temp) / "fixture"
+            fixture.mkdir()
+            response = workspace / item["id"] / "with_skill" / "outputs" / "response.md"
+            response.parent.mkdir(parents=True)
+            response.write_text("old response\n", encoding="utf-8")
+            completed = runner.subprocess.CompletedProcess(["codex"], 0, stdout="", stderr="")
+            with mock.patch.object(runner, "codex_command", return_value=["codex"]), mock.patch.object(
+                runner.subprocess, "run", return_value=completed
+            ):
+                with self.assertRaises(RuntimeError):
+                    runner.run_one(item, "with_skill", fixture, workspace)
+            self.assertFalse(response.exists())
 
 
 if __name__ == "__main__":

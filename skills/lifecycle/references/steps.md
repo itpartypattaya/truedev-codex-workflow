@@ -45,10 +45,12 @@ Open the COMPONENTS gate and stop.
 ## IMPLEMENT
 
 1. Work through the approved plan in small, reviewable changes.
-2. Preserve user-owned changes and agreed file ownership.
-3. Run focused checks after each meaningful unit rather than waiting for the end.
-4. If scope must change, stop and return to a user decision; do not silently expand it.
-5. Finish IMPLEMENT only after the implementation checks available in the repository pass.
+2. For a defect, reproduce it and identify the root cause before editing; make the regression test fail
+   first, then apply the smallest fix. Avoid unrelated refactoring.
+3. Preserve user-owned changes and agreed file ownership.
+4. Run focused checks after each meaningful unit rather than waiting for the end.
+5. If scope must change, stop and return to a user decision; do not silently expand it.
+6. Finish IMPLEMENT only after the implementation checks available in the repository pass.
 
 ## VERIFY — user gate
 

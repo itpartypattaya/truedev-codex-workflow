@@ -35,6 +35,18 @@
         "Does not prescribe Node or frontend tooling",
         "Keeps unavailable validation layers explicit"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "В активном slice упал тест оплаты. Срочно поправь как-нибудь и заодно отрефактори модуль.",
+      "expected_output": "The workflow reproduces the failure, isolates its root cause, adds a failing regression test, and applies a narrow fix without bundling unrelated refactoring.",
+      "files": [],
+      "expectations": [
+        "Reproduces the failing test before editing",
+        "Identifies a root cause rather than guessing",
+        "Adds a regression test that fails before the fix",
+        "Declines unrelated refactoring outside the approved scope"
+      ]
     }
   ]
 }

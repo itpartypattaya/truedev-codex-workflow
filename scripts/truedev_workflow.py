@@ -199,6 +199,14 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
         if status == "completed" and expected_gate == "user" and not item.get("approved_at"):
             raise WorkflowError(f"completed user gate {name} lacks approved_at")
 
+    current_status = steps[current]["status"]
+    if current_status == "completed":
+        if current_index != len(order) - 1:
+            raise WorkflowError(f"non-final current step {current} cannot be completed")
+        _validate_text(state.get("finished_at"), "finished_at")
+    elif "finished_at" in state:
+        raise WorkflowError("finished_at is only valid after the final step is completed")
+
     history = state.get("history", [])
     if not isinstance(history, list) or len(history) > 1000:
         raise WorkflowError("history must be an array with at most 1000 entries")
@@ -470,10 +478,26 @@ def archive_workflow(workflow: str) -> int:
 def git_preflight(args: argparse.Namespace) -> int:
     root = _repo_root_or_error()
     problems: list[str] = []
-    status = _run_git(root, "status", "--porcelain=v1", "--untracked-files=all")
+    status = _run_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     if status.returncode != 0:
         raise WorkflowError(status.stderr.strip() or "git status failed")
-    changed = [line[3:] for line in status.stdout.splitlines() if len(line) >= 4]
+    changed: list[str] = []
+    records = status.stdout.split("\0")
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        if len(record) < 4:
+            raise WorkflowError("git status returned an invalid porcelain record")
+        code = record[:2]
+        changed.append(record[3:])
+        if "R" in code or "C" in code:
+            if index >= len(records) or not records[index]:
+                raise WorkflowError("git status returned an incomplete rename/copy record")
+            changed.append(records[index])
+            index += 1
     sensitive = [path for path in changed if is_sensitive_path(path)]
     if sensitive:
         problems.append("sensitive or transient paths present: " + ", ".join(sensitive))
@@ -606,6 +630,14 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
 
 def hook_session_start() -> int:
     payload = _hook_payload()
+    if payload.get("source") != "compact":
+        return _emit(
+            {
+                "continue": False,
+                "stopReason": "TrueDev compact restoration requires SessionStart source=compact.",
+                "systemMessage": "TrueDev did not change workflow state for a non-compact session start.",
+            }
+        )
     root = find_repo_root(payload.get("cwd") or Path.cwd())
     if root is None:
         return 0
