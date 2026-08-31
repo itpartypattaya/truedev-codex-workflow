@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -66,12 +67,20 @@ class ReleaseTests(unittest.TestCase):
             response.parent.mkdir(parents=True)
             response.write_text("old response\n", encoding="utf-8")
             completed = runner.subprocess.CompletedProcess(["codex"], 0, stdout="", stderr="")
+            def create_empty_output(*_args, **_kwargs):
+                response.write_text("", encoding="utf-8")
+                return completed
+
             with mock.patch.object(runner, "codex_command", return_value=["codex"]), mock.patch.object(
-                runner.subprocess, "run", return_value=completed
+                runner.subprocess, "run", side_effect=create_empty_output
             ):
                 with self.assertRaises(RuntimeError):
                     runner.run_one(item, "with_skill", fixture, workspace)
             self.assertFalse(response.exists())
+            timing = json.loads((response.parents[1] / "timing.json").read_text(encoding="utf-8"))
+            self.assertFalse(timing["completed"])
+            self.assertFalse(timing["output_valid"])
+            self.assertFalse(runner.completed_run(workspace, item["id"], "with_skill"))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import sys
 import time
 from typing import Any
 
-from run_release_evals import DEFAULT_WORKSPACE, ROOT, codex_command, extract_total_tokens, load_evals
+from run_release_evals import DEFAULT_WORKSPACE, ROOT, codex_command, completed_run, extract_total_tokens, load_evals
 
 
 RESULTS = ROOT / "evals" / "results"
@@ -27,11 +27,9 @@ def load_runs(workspace: Path) -> list[dict[str, Any]]:
             run_dir = workspace / item["id"] / configuration
             response_path = run_dir / "outputs" / "response.md"
             timing_path = run_dir / "timing.json"
-            if not response_path.is_file() or not timing_path.is_file():
-                raise RuntimeError(f"missing completed run: {item['id']} {configuration}")
+            if not completed_run(workspace, item["id"], configuration):
+                raise RuntimeError(f"missing or invalid completed run: {item['id']} {configuration}")
             timing = json.loads(timing_path.read_text(encoding="utf-8"))
-            if timing.get("exit_code") != 0:
-                raise RuntimeError(f"failed run: {item['id']} {configuration}")
             stderr = (run_dir / "stderr.txt").read_text(encoding="utf-8")
             errors = [line for line in stderr.splitlines() if " ERROR " in line]
             runs.append(

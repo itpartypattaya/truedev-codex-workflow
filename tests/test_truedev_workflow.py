@@ -80,7 +80,13 @@ class WorkflowTests(unittest.TestCase):
         return result, stdout.getvalue(), stderr.getvalue()
 
     def start_lifecycle(self, task: str = "fixture task") -> None:
-        code, _, error = self.cli("lifecycle", "start", "--task", task)
+        code, _, error = self.cli("lifecycle", "start", "--task", task, "--base", "main")
+        self.assertEqual(code, 0, error)
+
+    def test_default_branch_requires_authoritative_origin_head_or_explicit_base(self) -> None:
+        with self.assertRaisesRegex(workflow.WorkflowError, "pass --base explicitly"):
+            workflow.detect_default_branch(self.root)
+        code, _, error = self.cli("lifecycle", "start", "--task", "explicit base", "--base", "main")
         self.assertEqual(code, 0, error)
 
     def test_finds_repo_and_state_from_nested_directory(self) -> None:
@@ -230,6 +236,50 @@ class WorkflowTests(unittest.TestCase):
         state["repo_root"] = str(self.root / "different-repository")
         path.write_text(json.dumps(state), encoding="utf-8")
         with self.assertRaisesRegex(workflow.WorkflowError, "different repository root"):
+            workflow.load_state(self.root, "lifecycle")
+
+    def test_lifecycle_blocks_transitions_and_hooks_after_branch_change(self) -> None:
+        self.start_lifecycle()
+        git(self.root, "switch", "-c", "unrelated")
+
+        code, _, error = self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.assertEqual(code, 2)
+        self.assertIn("started on branch", error)
+        status_code, status, _ = self.cli("lifecycle", "status")
+        self.assertEqual(status_code, 0)
+        self.assertIn("active: unrelated; MISMATCH", status)
+        _, output, _ = self.hook(
+            "pre-tool",
+            {"cwd": str(self.root), "tool_name": "apply_patch", "tool_input": {"command": "patch"}},
+        )
+        decision = json.loads(output)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("started on branch", decision["permissionDecisionReason"])
+
+    def test_completed_user_gate_requires_timestamped_matching_receipt(self) -> None:
+        self.start_lifecycle()
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        self.cli("lifecycle", "approve", "--step", "SCOPE", "--user-confirmed")
+        path = workflow.state_path(self.root, "lifecycle")
+        valid = json.loads(path.read_text(encoding="utf-8"))
+
+        invalid_timestamp = json.loads(json.dumps(valid))
+        invalid_timestamp["steps"]["SCOPE"]["approved_at"] = True
+        path.write_text(json.dumps(invalid_timestamp), encoding="utf-8")
+        with self.assertRaisesRegex(workflow.WorkflowError, "approved_at must be a string"):
+            workflow.load_state(self.root, "lifecycle")
+
+        missing_receipt = json.loads(json.dumps(valid))
+        missing_receipt["history"] = [entry for entry in missing_receipt["history"] if entry["action"] != "approve"]
+        path.write_text(json.dumps(missing_receipt), encoding="utf-8")
+        with self.assertRaisesRegex(workflow.WorkflowError, "matching approval receipt"):
+            workflow.load_state(self.root, "lifecycle")
+
+        missing_gate = json.loads(json.dumps(valid))
+        missing_gate["history"] = [entry for entry in missing_gate["history"] if entry["action"] != "gate"]
+        path.write_text(json.dumps(missing_gate), encoding="utf-8")
+        with self.assertRaisesRegex(workflow.WorkflowError, "preceding gate receipt"):
             workflow.load_state(self.root, "lifecycle")
 
     def test_git_preflight_detects_dirty_and_sensitive_paths(self) -> None:

@@ -10,7 +10,10 @@ replace:
 - The step set and order are fixed.
 - All steps before `current_step` are completed; all later steps are pending.
 - A user gate may be `awaiting_approval`; an automatic step may not.
-- A completed user gate has an `approved_at` timestamp.
+- A completed user gate has an ISO-8601 UTC `approved_at` timestamp and exactly one matching,
+  ordered approval receipt after its gate receipt.
+- Lifecycle transitions and mutation hooks require the active Git branch to match the branch recorded
+  at workflow start. Status remains readable and labels a mismatch for recovery.
 - `awaiting_compact` is boolean and is cleared only by a validated compact-session hook.
 - History contains transition metadata, not free-form prompts or repository content.
 

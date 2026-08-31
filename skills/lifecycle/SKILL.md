@@ -62,7 +62,9 @@ state file manually.
    instead of stashing, resetting, committing, or deleting it.
 4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
    task-owned change; never start with tracked or potentially committable state.
-5. Detect the default branch from Git. Do not assume `main` or `master`, and do not pull automatically.
+5. Detect the default branch only from a valid `origin/HEAD`. If Git cannot identify it
+   authoritatively, obtain an explicit `--base` from the user; never infer `main`, `master`, or the
+   current branch, and do not pull automatically.
 6. For implementation work, create a dedicated local branch or worktree only when this is within the
    user's request. Never switch branches across unrelated user changes.
 7. Run:
