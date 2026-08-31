@@ -35,6 +35,30 @@
         "Does not prescribe Node or frontend tooling",
         "Keeps unavailable validation layers explicit"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "В активном slice упал тест оплаты. Срочно поправь как-нибудь и заодно отрефактори модуль.",
+      "expected_output": "The workflow reproduces the failure, isolates its root cause, adds a failing regression test, and applies a narrow fix without bundling unrelated refactoring.",
+      "files": [],
+      "expectations": [
+        "Reproduces the failing test before editing",
+        "Identifies a root cause rather than guessing",
+        "Adds a regression test that fails before the fix",
+        "Declines unrelated refactoring outside the approved scope"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "IMPLEMENT и TEST завершены. Подготовь REVIEW для slice с тремя acceptance criteria, один из которых пока не подтверждён ручной проверкой.",
+      "expected_output": "The review maps every criterion to concrete evidence and an explicit gap, without presenting the matrix as proof or hiding the missing manual check.",
+      "files": [],
+      "expectations": [
+        "Includes Criterion, Evidence, and Gap columns",
+        "Maps every acceptance criterion exactly once",
+        "Names concrete commands, results, tests, diffs, or artifacts as evidence",
+        "Keeps the missing manual verification as an unresolved gap"
+      ]
     }
   ]
 }

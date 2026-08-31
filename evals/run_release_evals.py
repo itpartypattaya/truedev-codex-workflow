@@ -131,6 +131,7 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     response_path = outputs / "response.md"
+    response_path.unlink(missing_ok=True)
     command = [
         *codex_command(),
         "exec",
@@ -161,6 +162,10 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
     end_wall = dt.datetime.now(dt.timezone.utc)
     (run_dir / "transcript.jsonl").write_text(result.stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(result.stderr, encoding="utf-8")
+    output_valid = response_path.is_file() and response_path.stat().st_size > 0
+    completed = result.returncode == 0 and output_valid
+    if not completed:
+        response_path.unlink(missing_ok=True)
     timing = {
         "total_tokens": extract_total_tokens(result.stdout),
         "duration_ms": round(duration * 1000),
@@ -169,11 +174,13 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
         "executor_end": end_wall.isoformat(),
         "executor_duration_seconds": round(duration, 3),
         "exit_code": result.returncode,
+        "output_valid": output_valid,
+        "completed": completed,
     }
     (run_dir / "timing.json").write_text(
         json.dumps(timing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    if result.returncode != 0 or not response_path.is_file():
+    if not completed:
         raise RuntimeError(f"{item['id']} {configuration} failed with exit code {result.returncode}")
     print(f"PASS executor {item['id']} {configuration}: {duration:.1f}s, {timing['total_tokens']} tokens", flush=True)
 
@@ -182,13 +189,13 @@ def completed_run(workspace: Path, eval_id: str, configuration: str) -> bool:
     run_dir = workspace / eval_id / configuration
     output = run_dir / "outputs" / "response.md"
     timing_path = run_dir / "timing.json"
-    if not output.is_file() or not timing_path.is_file():
+    if not output.is_file() or output.stat().st_size == 0 or not timing_path.is_file():
         return False
     try:
         timing = json.loads(timing_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    return timing.get("exit_code") == 0 and timing.get("total_tokens", 0) > 0
+    return timing.get("exit_code") == 0 and timing.get("output_valid") is True and timing.get("completed") is True
 
 
 def main(argv: list[str] | None = None) -> int:

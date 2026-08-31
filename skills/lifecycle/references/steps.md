@@ -45,10 +45,12 @@ Open the COMPONENTS gate and stop.
 ## IMPLEMENT
 
 1. Work through the approved plan in small, reviewable changes.
-2. Preserve user-owned changes and agreed file ownership.
-3. Run focused checks after each meaningful unit rather than waiting for the end.
-4. If scope must change, stop and return to a user decision; do not silently expand it.
-5. Finish IMPLEMENT only after the implementation checks available in the repository pass.
+2. For a defect, reproduce it and identify the root cause before editing; make the regression test fail
+   first, then apply the smallest fix. Avoid unrelated refactoring.
+3. Preserve user-owned changes and agreed file ownership.
+4. Run focused checks after each meaningful unit rather than waiting for the end.
+5. If scope must change, stop and return to a user decision; do not silently expand it.
+6. Finish IMPLEMENT only after the implementation checks available in the repository pass.
 
 ## VERIFY — user gate
 
@@ -73,7 +75,15 @@ Open the COMPONENTS gate and stop.
 3. Review correctness, authorization, data integrity, concurrency, error handling, observability,
    performance, compatibility, and test gaps.
 4. Report findings as P0/P1/P2 with exact files and evidence. Do not hide findings because tests pass.
-5. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
+5. Map every approved acceptance criterion before opening the gate:
+
+   | Criterion | Evidence | Gap |
+   | --- | --- | --- |
+   | `<criterion>` | `<command/result, test, diff, or artifact>` | `none` or `<unresolved work>` |
+
+   Use `none` only when current evidence directly proves the criterion. Turn unresolved gaps into
+   findings or explicit limitations; do not treat the matrix itself as evidence.
+6. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
    verification before approval transition.
 
 ## DOCUMENT

@@ -1,6 +1,6 @@
 ---
 name: lifecycle
-description: Run a planned software slice through safe context checking, scope approval, planning, implementation, verification, testing, review, documentation, and closeout. Use whenever the user asks to start or continue a feature lifecycle, implement the next slice, check workflow status, resume after compaction, or enforce approval gates during a long Codex coding task. Do not use for a one-off explanation or read-only review that is not part of an active delivery workflow.
+description: Run a planned software slice or scoped bug fix through safe context checking, scope approval, planning, implementation, verification, testing, review, documentation, and closeout. Use whenever the user asks to start or continue a feature lifecycle, implement the next slice, fix a bug within an active delivery workflow, check workflow status, resume after compaction, or enforce approval gates during a long Codex coding task. Do not use for a one-off explanation or read-only review that is not part of an active delivery workflow.
 compatibility: Requires Git and Python 3.9 or newer. Codex hooks are optional guardrails and require user trust after installation.
 ---
 
@@ -36,6 +36,8 @@ the user's repository.
 - **continue/resume:** validate state, read only the current section of
   `<SKILL_DIR>/references/steps.md`, and
   continue that step.
+- **bug or failing check:** reproduce it, trace the root cause, add the smallest regression test that
+  fails for that cause, then make the narrowest fix. Keep these actions inside the normal ordered steps.
 - **recover:** stop automatic mutation. Reconstruct evidence from Git, docs, and test results; show
   the proposed state to the user before creating or changing any state file.
 
@@ -60,7 +62,9 @@ state file manually.
    instead of stashing, resetting, committing, or deleting it.
 4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
    task-owned change; never start with tracked or potentially committable state.
-5. Detect the default branch from Git. Do not assume `main` or `master`, and do not pull automatically.
+5. Detect the default branch only from a valid `origin/HEAD`. If Git cannot identify it
+   authoritatively, obtain an explicit `--base` from the user; never infer `main`, `master`, or the
+   current branch, and do not pull automatically.
 6. For implementation work, create a dedicated local branch or worktree only when this is within the
    user's request. Never switch branches across unrelated user changes.
 7. Run:

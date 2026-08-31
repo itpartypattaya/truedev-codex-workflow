@@ -141,6 +141,17 @@ def _validate_text(value: Any, field: str, *, maximum: int = 5000, allow_empty: 
     return value
 
 
+def _validate_timestamp(value: Any, field: str) -> str:
+    text = _validate_text(value, field, maximum=64)
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise WorkflowError(f"{field} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+        raise WorkflowError(f"{field} must be an ISO-8601 UTC timestamp")
+    return text
+
+
 def _definition(workflow: str) -> tuple[tuple[str, ...], frozenset[str], str]:
     if workflow == "lifecycle":
         return LIFECYCLE_STEPS, LIFECYCLE_USER_GATES, "current_step"
@@ -158,8 +169,8 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
     if state.get("workflow") != workflow:
         raise WorkflowError(f"state workflow must be {workflow!r}")
     _validate_text(state.get("repo_root"), "repo_root")
-    _validate_text(state.get("started_at"), "started_at")
-    _validate_text(state.get("updated_at"), "updated_at")
+    _validate_timestamp(state.get("started_at"), "started_at")
+    _validate_timestamp(state.get("updated_at"), "updated_at")
     if workflow == "lifecycle":
         _validate_text(state.get("task"), "task")
         _validate_text(state.get("base_branch"), "base_branch", maximum=255)
@@ -196,15 +207,58 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
             raise WorkflowError(f"current step {name} must be active or completed")
         if index > current_index and status != "pending":
             raise WorkflowError(f"later step {name} must remain pending")
-        if status == "completed" and expected_gate == "user" and not item.get("approved_at"):
-            raise WorkflowError(f"completed user gate {name} lacks approved_at")
+        approved_at = item.get("approved_at")
+        if status == "completed" and expected_gate == "user":
+            _validate_timestamp(approved_at, f"steps.{name}.approved_at")
+        elif approved_at is not None:
+            raise WorkflowError(f"steps.{name}.approved_at is only valid for a completed user gate")
+
+    current_status = steps[current]["status"]
+    if current_status == "completed":
+        if current_index != len(order) - 1:
+            raise WorkflowError(f"non-final current step {current} cannot be completed")
+        _validate_timestamp(state.get("finished_at"), "finished_at")
+    elif "finished_at" in state:
+        raise WorkflowError("finished_at is only valid after the final step is completed")
 
     history = state.get("history", [])
     if not isinstance(history, list) or len(history) > 1000:
         raise WorkflowError("history must be an array with at most 1000 entries")
+    approval_receipts: list[tuple[str, str, int]] = []
+    gate_receipts: list[tuple[str, int]] = []
     for index, entry in enumerate(history):
         if not isinstance(entry, dict):
             raise WorkflowError(f"history[{index}] must be an object")
+        event_at = _validate_timestamp(entry.get("at"), f"history[{index}].at")
+        action = _validate_text(entry.get("action"), f"history[{index}].action", maximum=64)
+        event_name = _validate_text(entry.get("name"), f"history[{index}].name", maximum=255)
+        actor = _validate_text(entry.get("actor"), f"history[{index}].actor", maximum=64)
+        if event_name not in order:
+            raise WorkflowError(f"history[{index}].name is not a declared workflow step")
+        if action == "gate":
+            if event_name not in user_gates or actor != "codex":
+                raise WorkflowError(f"history[{index}] is not a valid user gate receipt")
+            gate_receipts.append((event_name, index))
+        if action == "approve":
+            if event_name not in user_gates or actor != "user-explicit":
+                raise WorkflowError(f"history[{index}] is not a valid user approval receipt")
+            approval_receipts.append((event_name, event_at, index))
+
+    for name in user_gates:
+        item = steps[name]
+        matching = [
+            receipt
+            for receipt in approval_receipts
+            if receipt[:2] == (name, item.get("approved_at"))
+        ]
+        if item["status"] == "completed" and len(matching) != 1:
+            raise WorkflowError(f"completed user gate {name} lacks exactly one matching approval receipt")
+        if item["status"] == "completed" and not any(
+            gate_name == name and gate_index < matching[0][2] for gate_name, gate_index in gate_receipts
+        ):
+            raise WorkflowError(f"completed user gate {name} lacks a preceding gate receipt")
+        if item["status"] != "completed" and any(receipt[0] == name for receipt in approval_receipts):
+            raise WorkflowError(f"incomplete user gate {name} cannot have an approval receipt")
 
 
 def load_state(root: Path, workflow: str) -> dict[str, Any] | None:
@@ -237,24 +291,20 @@ def _new_steps(order: Sequence[str], user_gates: Iterable[str]) -> dict[str, dic
     }
 
 
-def _history(state: dict[str, Any], action: str, name: str, actor: str) -> None:
+def _history(state: dict[str, Any], action: str, name: str, actor: str, *, at: str | None = None) -> None:
     state.setdefault("history", []).append(
-        {"at": utc_now(), "action": action, "name": name, "actor": actor}
+        {"at": at or utc_now(), "action": action, "name": name, "actor": actor}
     )
 
 
 def detect_default_branch(root: Path) -> str:
     symbolic = _run_git(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if symbolic.returncode == 0 and symbolic.stdout.strip().startswith("origin/"):
-        return symbolic.stdout.strip().split("/", 1)[1]
-    for candidate in ("main", "master"):
-        exists = _run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{candidate}")
-        if exists.returncode == 0:
-            return candidate
-    current = _run_git(root, "branch", "--show-current")
-    if current.returncode == 0 and current.stdout.strip():
-        return current.stdout.strip()
-    raise WorkflowError("cannot determine the repository default branch")
+        branch = symbolic.stdout.strip().split("/", 1)[1]
+        target = _run_git(root, "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+        if target.returncode == 0:
+            return branch
+    raise WorkflowError("cannot determine the default branch from origin/HEAD; pass --base explicitly")
 
 
 def current_branch(root: Path) -> str:
@@ -265,6 +315,16 @@ def current_branch(root: Path) -> str:
     if not branch:
         raise WorkflowError("detached HEAD is not supported by lifecycle start")
     return branch
+
+
+def require_lifecycle_branch(root: Path, state: Mapping[str, Any]) -> None:
+    recorded = _validate_text(state.get("branch"), "branch", maximum=255)
+    active = current_branch(root)
+    if active != recorded:
+        raise WorkflowError(
+            f"lifecycle started on branch {recorded!r}, but the active branch is {active!r}; "
+            "switch back or recover the workflow before mutating"
+        )
 
 
 def _repo_root_or_error(cwd: str | Path | None = None) -> Path:
@@ -359,6 +419,8 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
     state = load_state(root, workflow)
     if state is None:
         raise WorkflowError(f"no active {workflow} workflow")
+    if workflow == "lifecycle":
+        require_lifecycle_branch(root, state)
     order, user_gates, current_key = _definition(workflow)
     current = state[current_key]
     if name.upper() != current:
@@ -376,6 +438,7 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
         print(f"{current} is awaiting explicit user approval.")
         return 0
 
+    transition_at: str | None = None
     if action == "approve":
         if current not in user_gates:
             raise WorkflowError(f"{current} is not a user gate")
@@ -383,7 +446,8 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
             raise WorkflowError(f"{current} is not awaiting approval")
         if not user_confirmed:
             raise WorkflowError("approval requires --user-confirmed after an explicit user message")
-        item["approved_at"] = utc_now()
+        transition_at = utc_now()
+        item["approved_at"] = transition_at
         actor = "user-explicit"
     elif action == "finish":
         if current in user_gates:
@@ -395,7 +459,7 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
         raise WorkflowError(f"unsupported transition action: {action}")
 
     item["status"] = "completed"
-    _history(state, action, current, actor)
+    _history(state, action, current, actor, at=transition_at)
     index = order.index(current)
     if index + 1 < len(order):
         next_name = order[index + 1]
@@ -423,7 +487,14 @@ def print_status(workflow: str) -> int:
     print(f"{workflow}: {state[current_key]}")
     if workflow == "lifecycle":
         print(f"task: {state['task']}")
-        print(f"branch: {state['branch']} (base: {state['base_branch']})")
+        active_branch = current_branch(root)
+        if active_branch == state["branch"]:
+            print(f"branch: {state['branch']} (base: {state['base_branch']})")
+        else:
+            print(
+                f"branch: {state['branch']} (active: {active_branch}; MISMATCH; "
+                f"base: {state['base_branch']})"
+            )
         print(f"awaiting_compact: {str(state['awaiting_compact']).lower()}")
     else:
         print(f"project: {state['project']}")
@@ -452,6 +523,8 @@ def archive_workflow(workflow: str) -> int:
     state = load_state(root, workflow)
     if state is None:
         raise WorkflowError(f"no active {workflow} workflow")
+    if workflow == "lifecycle":
+        require_lifecycle_branch(root, state)
     order, _, current_key = _definition(workflow)
     if state[current_key] != order[-1] or state["steps"][order[-1]]["status"] != "completed":
         raise WorkflowError(f"cannot archive {workflow} before {order[-1]} is completed")
@@ -470,10 +543,26 @@ def archive_workflow(workflow: str) -> int:
 def git_preflight(args: argparse.Namespace) -> int:
     root = _repo_root_or_error()
     problems: list[str] = []
-    status = _run_git(root, "status", "--porcelain=v1", "--untracked-files=all")
+    status = _run_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     if status.returncode != 0:
         raise WorkflowError(status.stderr.strip() or "git status failed")
-    changed = [line[3:] for line in status.stdout.splitlines() if len(line) >= 4]
+    changed: list[str] = []
+    records = status.stdout.split("\0")
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        if len(record) < 4:
+            raise WorkflowError("git status returned an invalid porcelain record")
+        code = record[:2]
+        changed.append(record[3:])
+        if "R" in code or "C" in code:
+            if index >= len(records) or not records[index]:
+                raise WorkflowError("git status returned an incomplete rename/copy record")
+            changed.append(records[index])
+            index += 1
     sensitive = [path for path in changed if is_sensitive_path(path)]
     if sensitive:
         problems.append("sensitive or transient paths present: " + ", ".join(sensitive))
@@ -503,11 +592,15 @@ def git_preflight(args: argparse.Namespace) -> int:
         active = sorted({label for marker, label in operations.items() if (git_dir / marker).exists()})
         if active:
             problems.append("git operation in progress: " + ", ".join(active))
+    try:
+        default_branch: str | None = detect_default_branch(root)
+    except WorkflowError:
+        default_branch = None
     result = {
         "ok": not problems,
         "root": str(root),
         "branch": branch,
-        "default_branch": detect_default_branch(root),
+        "default_branch": default_branch,
         "changed": changed,
         "problems": problems,
     }
@@ -561,6 +654,8 @@ def _active_states(root: Path) -> list[tuple[str, dict[str, Any]]]:
         if path.exists():
             state = load_state(root, workflow)
             if state is not None:
+                if workflow == "lifecycle":
+                    require_lifecycle_branch(root, state)
                 active.append((workflow, state))
     return active
 
@@ -606,6 +701,14 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
 
 def hook_session_start() -> int:
     payload = _hook_payload()
+    if payload.get("source") != "compact":
+        return _emit(
+            {
+                "continue": False,
+                "stopReason": "TrueDev compact restoration requires SessionStart source=compact.",
+                "systemMessage": "TrueDev did not change workflow state for a non-compact session start.",
+            }
+        )
     root = find_repo_root(payload.get("cwd") or Path.cwd())
     if root is None:
         return 0
