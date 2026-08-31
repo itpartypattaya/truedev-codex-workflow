@@ -1,7 +1,6 @@
 ---
 name: lifecycle
 description: Run a planned software slice or scoped bug fix through safe context checking, scope approval, planning, implementation, verification, testing, review, documentation, and closeout. Use whenever the user asks to start or continue a feature lifecycle, implement the next slice, fix a bug within an active delivery workflow, check workflow status, resume after compaction, or enforce approval gates during a long Codex coding task. Do not use for a one-off explanation or read-only review that is not part of an active delivery workflow.
-compatibility: Requires Git and Python 3.9 or newer. Codex hooks are optional guardrails and require user trust after installation.
 ---
 
 # TrueDev Lifecycle
@@ -9,6 +8,11 @@ compatibility: Requires Git and Python 3.9 or newer. Codex hooks are optional gu
 Deliver one vertical slice at a time while keeping scope, approvals, and repository state explicit.
 The workflow state is durable, but hooks are guardrails rather than a security boundary. Never claim
 that a gate is impossible to bypass.
+
+## Requirements
+
+Require Git and Python 3.9 or newer. Treat installed Codex hooks as optional, user-trusted
+guardrails.
 
 ## Locate the bundled runner
 
@@ -38,8 +42,10 @@ the user's repository.
   continue that step.
 - **bug or failing check:** reproduce it, trace the root cause, add the smallest regression test that
   fails for that cause, then make the narrowest fix. Keep these actions inside the normal ordered steps.
-- **recover:** stop automatic mutation. Reconstruct evidence from Git, docs, and test results; show
-  the proposed state to the user before creating or changing any state file.
+- **recover after a branch change:** stop mutation, show the recorded and active branches, and use
+  `recover --accept-current-branch --user-confirmed` only after explicit approval.
+- **invalid or obsolete state:** do not fabricate approvals. Offer `abandon --user-confirmed`, which
+  preserves the original state in history before allowing a clean restart.
 
 If a runner command fails, report the error once. Do not retry by weakening validation or editing the
 state file manually.
@@ -48,16 +54,8 @@ state file manually.
 
 1. Run `<PYTHON> <RUNNER> --help` and stop if the required runner cannot start. A missing interpreter
    means hook enforcement is unavailable; do not create active state and imply gates are enforced.
-2. Read the nearest applicable `AGENTS.md` files and the selected slice.
-   If host policy rejects a combined or piped read command, retry each required file with a separate
-   read-only operation. A rejected read is not evidence that the file was inspected.
-   In the resulting status, name each file that was successfully read and summarize at least one
-   material directive from it in past tense. Do not say a file "will be read" after a successful read.
-   When repository instructions and build configuration both exist, state unambiguously that both were
-   read before selecting commands (for example: "Read `AGENTS.md` and `Makefile`"). "Considered" or
-   "will read" is not equivalent to recorded read evidence.
-   If either required file cannot be read, stop before choosing or naming repository commands. Do not
-   infer a command from the request, fixture description, conventions, or a failed read attempt.
+2. Read the nearest applicable `AGENTS.md`, selected slice, and repository command configuration.
+   Record only successful reads; follow the CONTEXT_CHECK evidence rules in `references/steps.md`.
 3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
    instead of stashing, resetting, committing, or deleting it.
 4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
@@ -85,6 +83,9 @@ python3 <RUNNER> lifecycle validate
 python3 <RUNNER> lifecycle finish --step <AUTO_STEP>
 python3 <RUNNER> lifecycle gate --step <USER_GATE>
 python3 <RUNNER> lifecycle approve --step <USER_GATE> --user-confirmed
+python3 <RUNNER> lifecycle skip --step COMPONENTS --reason non-ui
+python3 <RUNNER> lifecycle recover --accept-current-branch --user-confirmed
+python3 <RUNNER> lifecycle abandon --user-confirmed
 python3 <RUNNER> lifecycle archive
 ```
 
@@ -94,7 +95,7 @@ decision or consequences are unclear.
 
 ## Step order
 
-`CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → VERIFY → TEST → REVIEW → DOCUMENT → CLOSE`
+`CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → TEST → VERIFY → REVIEW → DOCUMENT → CLOSE`
 
 Read `<SKILL_DIR>/references/steps.md` only for the active step. Read
 `<SKILL_DIR>/references/state-schema.md` when diagnosing state validation or recovery. Keep the main

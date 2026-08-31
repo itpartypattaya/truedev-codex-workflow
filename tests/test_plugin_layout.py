@@ -41,8 +41,21 @@ class PluginLayoutTests(unittest.TestCase):
         for name in ("lifecycle", "project-init"):
             skill = ROOT / "skills" / name / "SKILL.md"
             text = skill.read_text(encoding="utf-8")
-            self.assertIn(f"name: {name}", text.split("---", 2)[1])
+            frontmatter = text.split("---", 2)[1]
+            self.assertIn(f"name: {name}", frontmatter)
+            self.assertNotIn("compatibility:", frontmatter)
             self.assertLess(len(text.splitlines()), 500)
+            openai_yaml = (skill.parent / "agents" / "openai.yaml").read_text(encoding="utf-8")
+            self.assertIn(f"${name}", openai_yaml)
+
+    def test_internal_eval_files_exist(self) -> None:
+        for name in ("lifecycle", "project-init"):
+            skill_root = ROOT / "skills" / name
+            data = json.loads((skill_root / "evals" / "evals.json").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(len(data["evals"]), 5)
+            for item in data["evals"]:
+                for relative in item["files"]:
+                    self.assertTrue((skill_root / relative).is_file(), f"missing eval file: {relative}")
 
     def test_review_requires_acceptance_evidence_matrix(self) -> None:
         steps = (ROOT / "skills" / "lifecycle" / "references" / "steps.md").read_text(encoding="utf-8")

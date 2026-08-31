@@ -49,7 +49,7 @@ source evidence or decision record where appropriate.
 ## Failure handling and observability
 ## Deployment, migrations, backup, and rollback
 ## Verification strategy
-## Robustness scores
+## Robustness coverage and evidence
 ## Risks, deferred decisions, and owner sign-offs
 ## Source versions and verification dates
 ```

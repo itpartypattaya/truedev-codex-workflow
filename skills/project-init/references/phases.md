@@ -16,6 +16,12 @@ Check the specification for:
 Write `docs/REQUIREMENTS.md` with stable requirement IDs, open questions, and clearly labelled
 assumptions. Do not silently fill material gaps. Present the blocking questions and open the gate.
 
+A short but meaningful product description is a valid input. Draft substantive baseline requirements,
+label assumptions, and keep unresolved decisions as open questions. Stop only when no meaningful
+objective exists or a missing choice makes even a provisional draft unsafe. If repository writes are
+unavailable, present the draft directly. Include material validation, error handling, security/privacy,
+and testing clauses rather than merely promising them later.
+
 ## PRD
 
 Read the approved requirements. Act as a senior product partner:
@@ -43,8 +49,9 @@ Read approved requirements and PRD, then inspect the existing repository when on
 3. Define component responsibilities, interfaces, data model, API or message contracts, identity and
    authorization, failure handling, observability, deployment, backup/restore, migrations, and
    rollback.
-4. Score error handling, concurrency, data integrity, performance, security, observability,
-   testability, and scalability from 0–3. Scores 0–1 require mitigation or explicit deferral.
+4. Classify error handling, concurrency, data integrity, performance, security, observability,
+   testability, and scalability as `covered`, `deferred`, or `N/A`. Record evidence for `covered`,
+   an owner and rationale for `deferred`, and a reason for `N/A`.
 5. For frontend work, extend the project's actual design system. Document tokens, reusable
    components, accessibility target, responsive rules, relevant states, and key-page wireframes.
    Select tooling from repository context; do not mandate a framework or Storybook.
@@ -86,7 +93,8 @@ Create `docs/plan/slice-NNN-<title>.md` containing:
 - acceptance criteria and required verification layers;
 - external approvals or provider dependencies.
 
-Validate the dependency graph for missing nodes and cycles. Present the ordered slice table. Sync to
+Run `project-init validate-slices --plan-dir docs/plan` to reject malformed IDs, missing nodes,
+self-dependencies, and cycles. Present the ordered slice table. Sync to
 an external tracker only after the user explicitly requests that external write. Open the
 DECOMPOSITION gate.
 

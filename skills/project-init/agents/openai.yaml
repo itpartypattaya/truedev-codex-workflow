@@ -1,6 +1,6 @@
 interface:
   display_name: "TrueDev Project Init"
   short_description: "Turn a specification into approved delivery slices."
-  default_prompt: "Analyze this specification and build durable project documentation."
+  default_prompt: "Use $project-init to turn this specification into approved delivery slices."
 policy:
   allow_implicit_invocation: true

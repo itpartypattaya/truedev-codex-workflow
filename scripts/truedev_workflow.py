@@ -20,7 +20,8 @@ import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+MAX_STATE_BYTES = 1024 * 1024
 STATE_DIR = ".truedev-workflow"
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -31,8 +32,8 @@ LIFECYCLE_STEPS = (
     "PLAN",
     "COMPONENTS",
     "IMPLEMENT",
-    "VERIFY",
     "TEST",
+    "VERIFY",
     "REVIEW",
     "DOCUMENT",
     "CLOSE",
@@ -54,8 +55,10 @@ CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
 SAFE_GATED_COMMAND = re.compile(
     r"^\s*(?:(?:python(?:3(?:\.\d+)?)?)|(?:py\s+-3))\s+"
-    r"(?:\"[^\"]*truedev_workflow\.py\"|'[^']*truedev_workflow\.py'|\S*truedev_workflow\.py)\s+"
+    r"(?P<runner>\"[^\"]*truedev_workflow\.py\"|'[^']*truedev_workflow\.py'|\S*truedev_workflow\.py)\s+"
     r"(?:(?:lifecycle|project-init)\s+(?:status|validate)|"
+    r"(?:lifecycle|project-init)\s+abandon\s+--user-confirmed|"
+    r"lifecycle\s+recover\s+--accept-current-branch\s+--user-confirmed|"
     r"(?:lifecycle|project-init)\s+approve\s+(?:--(?:step|phase)\s+)?[A-Z_]+\s+--user-confirmed)\s*$"
 )
 class WorkflowError(RuntimeError):
@@ -99,8 +102,13 @@ def state_path(root: Path, workflow: str) -> Path:
 def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
+    if path.is_symlink() or not path.is_file():
+        raise WorkflowError(f"invalid workflow state {path}: expected a regular file")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        if len(raw) > MAX_STATE_BYTES:
+            raise WorkflowError(f"invalid workflow state {path}: exceeds {MAX_STATE_BYTES} bytes")
+        value = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise WorkflowError(f"invalid workflow state {path}: {exc}") from exc
     if not isinstance(value, dict):
@@ -208,7 +216,12 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
         if index > current_index and status != "pending":
             raise WorkflowError(f"later step {name} must remain pending")
         approved_at = item.get("approved_at")
-        if status == "completed" and expected_gate == "user":
+        outcome = item.get("outcome")
+        if outcome not in {None, "not_applicable"}:
+            raise WorkflowError(f"steps.{name}.outcome is invalid: {outcome!r}")
+        if outcome == "not_applicable" and (name != "COMPONENTS" or status != "completed"):
+            raise WorkflowError("only a completed COMPONENTS step may be not_applicable")
+        if status == "completed" and expected_gate == "user" and outcome is None:
             _validate_timestamp(approved_at, f"steps.{name}.approved_at")
         elif approved_at is not None:
             raise WorkflowError(f"steps.{name}.approved_at is only valid for a completed user gate")
@@ -226,6 +239,7 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
         raise WorkflowError("history must be an array with at most 1000 entries")
     approval_receipts: list[tuple[str, str, int]] = []
     gate_receipts: list[tuple[str, int]] = []
+    skip_receipts: list[tuple[str, int]] = []
     for index, entry in enumerate(history):
         if not isinstance(entry, dict):
             raise WorkflowError(f"history[{index}] must be an object")
@@ -243,9 +257,21 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
             if event_name not in user_gates or actor != "user-explicit":
                 raise WorkflowError(f"history[{index}] is not a valid user approval receipt")
             approval_receipts.append((event_name, event_at, index))
+        if action == "skip":
+            if event_name != "COMPONENTS" or actor != "codex-not-applicable":
+                raise WorkflowError(f"history[{index}] is not a valid not-applicable receipt")
+            skip_receipts.append((event_name, index))
 
     for name in user_gates:
         item = steps[name]
+        if item.get("outcome") == "not_applicable":
+            if len([receipt for receipt in skip_receipts if receipt[0] == name]) != 1:
+                raise WorkflowError(f"not-applicable step {name} lacks exactly one skip receipt")
+            if any(receipt[0] == name for receipt in approval_receipts):
+                raise WorkflowError(f"not-applicable step {name} cannot have an approval receipt")
+            continue
+        if any(receipt[0] == name for receipt in skip_receipts):
+            raise WorkflowError(f"step {name} has a skip receipt without a not-applicable outcome")
         matching = [
             receipt
             for receipt in approval_receipts
@@ -286,6 +312,7 @@ def _new_steps(order: Sequence[str], user_gates: Iterable[str]) -> dict[str, dic
             "status": "in_progress" if index == 0 else "pending",
             "gate": "user" if name in gates else "auto",
             "approved_at": None,
+            "outcome": None,
         }
         for index, name in enumerate(order)
     }
@@ -477,6 +504,153 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
     return 0
 
 
+def lifecycle_skip_components(args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    state = load_state(root, "lifecycle")
+    if state is None:
+        raise WorkflowError("no active lifecycle workflow")
+    require_lifecycle_branch(root, state)
+    if args.step != "COMPONENTS" or state["current_step"] != "COMPONENTS":
+        raise WorkflowError("only the active COMPONENTS step can be marked not applicable")
+    item = state["steps"]["COMPONENTS"]
+    if item["status"] != "in_progress":
+        raise WorkflowError("COMPONENTS must be in_progress before it can be skipped")
+    item["status"] = "completed"
+    item["outcome"] = "not_applicable"
+    _history(state, "skip", "COMPONENTS", "codex-not-applicable")
+    state["current_step"] = "IMPLEMENT"
+    state["steps"]["IMPLEMENT"]["status"] = "in_progress"
+    _history(state, "enter", "IMPLEMENT", "codex")
+    save_state(root, "lifecycle", state)
+    print("COMPONENTS marked not applicable for non-UI work; IMPLEMENT is now in progress.")
+    return 0
+
+
+def _archive_raw_state(root: Path, workflow: str, label: str) -> Path:
+    source = state_path(root, workflow)
+    if not source.exists():
+        raise WorkflowError(f"no active {workflow} workflow")
+    if source.is_symlink() or not source.is_file():
+        raise WorkflowError(f"refusing to archive non-regular workflow state: {source}")
+    raw = source.read_bytes()
+    if len(raw) > MAX_STATE_BYTES:
+        raise WorkflowError(f"workflow state exceeds {MAX_STATE_BYTES} bytes")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    destination = root / STATE_DIR / "history" / f"{stamp}-{workflow}-{label}.state"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, destination)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+    return destination
+
+
+def abandon_workflow(workflow: str, *, user_confirmed: bool) -> int:
+    if not user_confirmed:
+        raise WorkflowError("abandon requires --user-confirmed after an explicit user message")
+    root = _repo_root_or_error()
+    source = state_path(root, workflow)
+    destination = _archive_raw_state(root, workflow, "abandoned")
+    source.unlink()
+    print(f"Abandoned {workflow}; preserved the original state at {destination}")
+    return 0
+
+
+def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: bool) -> int:
+    if not accept_current_branch or not user_confirmed:
+        raise WorkflowError(
+            "recovery requires --accept-current-branch and --user-confirmed after an explicit user decision"
+        )
+    root = _repo_root_or_error()
+    state = load_state(root, "lifecycle")
+    if state is None:
+        raise WorkflowError("no active lifecycle workflow")
+    active = current_branch(root)
+    if active == state["branch"]:
+        raise WorkflowError("lifecycle already matches the active branch; no recovery is needed")
+    previous = state["branch"]
+    destination = _archive_raw_state(root, "lifecycle", "before-branch-recovery")
+    state["branch"] = active
+    _history(state, "recover", state["current_step"], "user-explicit")
+    save_state(root, "lifecycle", state)
+    print(f"Recovered lifecycle branch {previous!r} -> {active!r}; original state: {destination}")
+    return 0
+
+
+def validate_slices(args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    plan_dir = (root / args.plan_dir).resolve()
+    try:
+        plan_dir.relative_to(root.resolve())
+    except ValueError as exc:
+        raise WorkflowError("plan directory must stay inside the repository") from exc
+    if not plan_dir.is_dir():
+        raise WorkflowError(f"plan directory does not exist: {plan_dir}")
+    records: dict[str, dict[str, Any]] = {}
+    problems: list[str] = []
+    for path in sorted(plan_dir.glob("slice-*.md")):
+        if path.is_symlink():
+            problems.append(f"slice file must not be a symlink: {path.name}")
+            continue
+        match = re.fullmatch(r"slice-(\d{3})-[^/\\]+\.md", path.name)
+        if not match:
+            problems.append(f"invalid slice filename: {path.name}")
+            continue
+        slice_id = f"slice-{match.group(1)}"
+        if slice_id in records:
+            problems.append(f"duplicate slice id: {slice_id}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        dependency_match = re.search(r"(?mi)^Depends on:\s*(.+?)\s*$", text)
+        if dependency_match is None:
+            problems.append(f"{path.name}: missing Depends on header")
+            dependencies: list[str] = []
+        else:
+            raw = dependency_match.group(1).strip()
+            dependencies = [] if raw.lower() == "none" else [item.strip() for item in raw.split(",") if item.strip()]
+        records[slice_id] = {"file": path.name, "dependencies": dependencies}
+    if not records:
+        problems.append("no valid slice files found")
+    for slice_id, record in records.items():
+        for dependency in record["dependencies"]:
+            if not re.fullmatch(r"slice-\d{3}", dependency):
+                problems.append(f"{record['file']}: invalid dependency id {dependency!r}")
+            elif dependency == slice_id:
+                problems.append(f"{record['file']}: self dependency {dependency}")
+            elif dependency not in records:
+                problems.append(f"{record['file']}: missing dependency {dependency}")
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(slice_id: str, trail: list[str]) -> None:
+        if slice_id in visiting:
+            cycle = trail[trail.index(slice_id):] + [slice_id]
+            problems.append("dependency cycle: " + " -> ".join(cycle))
+            return
+        if slice_id in visited:
+            return
+        visiting.add(slice_id)
+        for dependency in records[slice_id]["dependencies"]:
+            if dependency in records:
+                visit(dependency, [*trail, dependency])
+        visiting.remove(slice_id)
+        visited.add(slice_id)
+
+    for slice_id in records:
+        visit(slice_id, [slice_id])
+    result = {"ok": not problems, "slices": records, "problems": sorted(set(problems))}
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if not problems else 2
+
+
 def print_status(workflow: str) -> int:
     root = _repo_root_or_error()
     state = load_state(root, workflow)
@@ -644,7 +818,18 @@ def _is_safe_gate_command(payload: Mapping[str, Any]) -> bool:
     command = tool_input.get("command")
     if not isinstance(command, str) or SHELL_CONTROL.search(command):
         return False
-    return bool(SAFE_GATED_COMMAND.fullmatch(command))
+    match = SAFE_GATED_COMMAND.fullmatch(command)
+    if match is None:
+        return False
+    runner = match.group("runner").strip("\"'")
+    cwd = Path(str(payload.get("cwd") or Path.cwd()))
+    candidate = Path(runner)
+    if not candidate.is_absolute():
+        candidate = cwd / candidate
+    try:
+        return candidate.resolve() == Path(__file__).resolve()
+    except OSError:
+        return False
 
 
 def _active_states(root: Path) -> list[tuple[str, dict[str, Any]]]:
@@ -665,13 +850,13 @@ def hook_pre_tool() -> int:
     root = find_repo_root(payload.get("cwd") or Path.cwd())
     if root is None:
         return 0
+    if _is_safe_gate_command(payload):
+        return 0
     try:
         states = _active_states(root)
     except WorkflowError as exc:
         return _deny(f"TrueDev state is invalid; repair or recover it before mutating the repo: {exc}")
     if not states:
-        return 0
-    if _is_safe_gate_command(payload):
         return 0
     for workflow, state in states:
         _, _, current_key = _definition(workflow)
@@ -789,6 +974,21 @@ def build_parser() -> argparse.ArgumentParser:
                 "lifecycle", action, args.step, user_confirmed=getattr(args, "user_confirmed", False)
             )
         )
+    skip = lifecycle_sub.add_parser("skip")
+    skip.add_argument("--step", required=True, choices=("COMPONENTS",))
+    skip.add_argument("--reason", required=True, choices=("non-ui",))
+    skip.set_defaults(func=lifecycle_skip_components)
+    recover = lifecycle_sub.add_parser("recover")
+    recover.add_argument("--accept-current-branch", action="store_true")
+    recover.add_argument("--user-confirmed", action="store_true")
+    recover.set_defaults(
+        func=lambda args: recover_lifecycle_branch(
+            accept_current_branch=args.accept_current_branch, user_confirmed=args.user_confirmed
+        )
+    )
+    abandon = lifecycle_sub.add_parser("abandon")
+    abandon.add_argument("--user-confirmed", action="store_true")
+    abandon.set_defaults(func=lambda args: abandon_workflow("lifecycle", user_confirmed=args.user_confirmed))
     lifecycle_sub.add_parser("status").set_defaults(func=lambda _args: print_status("lifecycle"))
     lifecycle_sub.add_parser("validate").set_defaults(func=lambda _args: validate_command("lifecycle"))
     lifecycle_sub.add_parser("archive").set_defaults(func=lambda _args: archive_workflow("lifecycle"))
@@ -812,6 +1012,14 @@ def build_parser() -> argparse.ArgumentParser:
     project_sub.add_parser("status").set_defaults(func=lambda _args: print_status("project-init"))
     project_sub.add_parser("validate").set_defaults(func=lambda _args: validate_command("project-init"))
     project_sub.add_parser("archive").set_defaults(func=lambda _args: archive_workflow("project-init"))
+    project_abandon = project_sub.add_parser("abandon")
+    project_abandon.add_argument("--user-confirmed", action="store_true")
+    project_abandon.set_defaults(
+        func=lambda args: abandon_workflow("project-init", user_confirmed=args.user_confirmed)
+    )
+    slice_validation = project_sub.add_parser("validate-slices")
+    slice_validation.add_argument("--plan-dir", default="docs/plan")
+    slice_validation.set_defaults(func=validate_slices)
 
     preflight = sub.add_parser("git-preflight")
     preflight.add_argument("--require-clean", action="store_true")

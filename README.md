@@ -70,7 +70,7 @@ specification
   → INPUT_VALIDATION → PRD → ARCHITECTURE → PLANNING → DECOMPOSITION → FINALIZE
   → docs/plan/slice-NNN-*.md
   → CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT
-  → VERIFY → TEST → REVIEW → DOCUMENT → CLOSE
+  → TEST → VERIFY → REVIEW → DOCUMENT → CLOSE
 ```
 
 Active state is stored below `.truedev-workflow/` at the repository root and is Git-ignored. The
@@ -92,8 +92,10 @@ The detailed trust model, hook inputs, stored data, and limitations are document
 [`SECURITY.md`](SECURITY.md). TrueDev has no telemetry or bundled network client; see
 [`PRIVACY.md`](PRIVACY.md) for the complete data-handling statement.
 
-If an active state file is malformed, matching mutating tool calls fail closed. If no active state
-exists, the plugin is inert.
+If an active state file is malformed, matching mutating tool calls fail closed. Explicit
+`abandon --user-confirmed` preserves its original bytes before a clean restart. A valid lifecycle
+whose branch changed can be rebound only with `recover --accept-current-branch --user-confirmed`.
+If no active state exists, the plugin is inert.
 
 ## Git safety
 
