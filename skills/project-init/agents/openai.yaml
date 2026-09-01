@@ -1,6 +1,9 @@
 interface:
   display_name: "TrueDev Project Init"
   short_description: "Turn a specification into approved delivery slices."
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/logo.svg"
+  brand_color: "#5B21B6"
   default_prompt: "Use $project-init to turn this specification into approved delivery slices."
 policy:
   allow_implicit_invocation: true

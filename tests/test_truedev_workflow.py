@@ -95,6 +95,11 @@ class WorkflowTests(unittest.TestCase):
         (self.root / workflow.STATE_DIR).mkdir()
         self.assertEqual(workflow.find_repo_root(nested), self.root)
 
+    def test_nested_state_directory_cannot_shadow_git_root(self) -> None:
+        nested = self.root / "src" / "feature"
+        (nested / workflow.STATE_DIR).mkdir(parents=True)
+        self.assertEqual(workflow.find_repo_root(nested), self.root)
+
     def test_no_state_is_inert(self) -> None:
         code, output, _ = self.hook(
             "pre-tool",
@@ -110,6 +115,14 @@ class WorkflowTests(unittest.TestCase):
         code, _, error = self.cli("lifecycle", "start", "--task", "unsafe state")
         self.assertEqual(code, 2)
         self.assertIn("not ignored", error)
+        self.assertFalse((self.root / workflow.STATE_DIR).exists())
+
+        code, _, error = self.cli(
+            "project-init", "start", "--project", "unsafe", "--spec", "docs/spec.md"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not ignored", error)
+        self.assertFalse((self.root / workflow.STATE_DIR).exists())
 
     def test_malformed_state_fails_closed_for_mutation(self) -> None:
         state_dir = self.root / workflow.STATE_DIR
@@ -308,18 +321,15 @@ class WorkflowTests(unittest.TestCase):
             "deny",
         )
 
-    def test_user_gate_allows_narrow_read_only_commands(self) -> None:
+    def test_user_gate_allows_only_bundled_read_only_inspection(self) -> None:
         self.start_lifecycle()
         self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
         self.cli("lifecycle", "gate", "--step", "SCOPE")
         runner = ROOT / "scripts" / "truedev_workflow.py"
         commands = (
-            "git status --short --branch",
-            "git diff --cached --stat",
-            "git log --oneline -n 3",
-            "git show --stat HEAD",
-            "cat README.md",
-            "Get-Content -Raw -LiteralPath README.md",
+            f'python "{runner}" inspect git-status',
+            f'python "{runner}" inspect git-diff --staged --stat',
+            f'python "{runner}" inspect file --path README.md',
             f'python "{runner}" git-preflight',
             f'python "{runner}" project-init validate-slices --plan-dir docs/plan',
         )
@@ -331,6 +341,12 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(output, "", command)
 
         for command in (
+            "git status --short --branch",
+            "git diff --cached --stat",
+            "git log --oneline -n 3",
+            "git show --stat HEAD",
+            "cat README.md",
+            "Get-Content Env:TRUDEV_SYNTHETIC_SECRET",
             "git reset --hard",
             "cat ../outside.txt",
             "cat .env",
@@ -346,6 +362,45 @@ class WorkflowTests(unittest.TestCase):
                 "deny",
                 command,
             )
+
+    def test_safe_git_inspection_does_not_execute_external_diff_driver(self) -> None:
+        marker = self.root / "external-helper-ran"
+        helper = self.root / "external_diff.py"
+        helper.write_text(
+            "from pathlib import Path\nPath('external-helper-ran').write_text('ran')\n",
+            encoding="utf-8",
+        )
+        git(self.root, "config", "diff.external", f'{sys.executable} "{helper}"')
+        (self.root / "README.md").write_text("changed\n", encoding="utf-8")
+        code, _, error = self.cli("inspect", "git-diff")
+        self.assertEqual(code, 0, error)
+        self.assertFalse(marker.exists())
+
+    def test_file_inspection_rejects_sensitive_paths_and_symlinks(self) -> None:
+        (self.root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+        self.assertEqual(self.cli("inspect", "file", "--path", ".env")[0], 2)
+        self.assertEqual(self.cli("inspect", "file", "--path", "../outside.txt")[0], 2)
+        if hasattr(os, "symlink"):
+            link = self.root / "readme-link"
+            try:
+                link.symlink_to(self.root / "README.md")
+            except OSError:
+                return
+            self.assertEqual(self.cli("inspect", "file", "--path", "readme-link")[0], 2)
+
+    def test_malformed_hook_payload_fails_closed_without_traceback(self) -> None:
+        runner = ROOT / "scripts" / "truedev_workflow.py"
+        result = subprocess.run(
+            [sys.executable, str(runner), "hook", "pre-tool"],
+            cwd=self.root,
+            input=json.dumps({"cwd": 123, "tool_name": "Bash", "tool_input": {}}),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cwd must be a string", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_plan_completion_requires_real_compaction_before_mutation(self) -> None:
         self.start_lifecycle()
@@ -390,6 +445,30 @@ class WorkflowTests(unittest.TestCase):
         state = workflow.load_state(self.root, "lifecycle")
         self.assertFalse(state["awaiting_compact"])
         self.assertTrue(any(item["action"] == "release-compact" for item in state["history"]))
+
+    def test_concurrent_compact_release_records_exactly_one_receipt(self) -> None:
+        self.start_lifecycle()
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        self.cli("lifecycle", "approve", "--step", "SCOPE", "--user-confirmed")
+        self.cli("lifecycle", "finish", "--step", "PLAN")
+        runner = ROOT / "scripts" / "truedev_workflow.py"
+        command = [
+            sys.executable,
+            str(runner),
+            "lifecycle",
+            "release-compact",
+            "--user-confirmed",
+        ]
+        processes = [
+            subprocess.Popen(command, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for _ in range(2)
+        ]
+        results = [process.communicate(timeout=15) + (process.returncode,) for process in processes]
+        self.assertEqual(sorted(result[2] for result in results), [0, 2], results)
+        state = workflow.load_state(self.root, "lifecycle")
+        receipts = [item for item in state["history"] if item["action"] == "release-compact"]
+        self.assertEqual(len(receipts), 1)
 
     def test_non_compact_session_start_does_not_clear_compact_gate(self) -> None:
         self.start_lifecycle()
@@ -533,6 +612,11 @@ class WorkflowTests(unittest.TestCase):
             "app/credentials.json",
             "aws/credentials",
             "deploy/id_rsa",
+            "deploy/id_ed25519",
+            "infra/terraform.tfstate",
+            "home/.docker/config.json",
+            "kubeconfig",
+            "composer/auth.json",
             "serviceAccount.json",
             "server.pfx",
             "server.p12",

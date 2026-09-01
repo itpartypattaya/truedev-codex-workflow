@@ -71,6 +71,9 @@ python3 <RUNNER> project-init archive
 
 Before opening a gate, ensure the durable artifact contains the decisions and evidence the user is
 approving. Once a gate is open, mutating repository tools are blocked by the optional hooks.
+Use only the bundled `inspect git-status`, `inspect git-diff`, and `inspect file --path <path>`
+commands for additional evidence while a gate is open; raw shell and Git reads are intentionally
+blocked.
 
 ## Phase order and artifacts
 

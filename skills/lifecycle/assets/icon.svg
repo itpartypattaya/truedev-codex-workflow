@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">TrueDev Workflow icon</title>
+  <desc id="desc">Three connected workflow gates ending in a check mark.</desc>
+  <rect width="128" height="128" rx="28" fill="#5B21B6"/>
+  <path d="M30 39h22M76 39h22M41 50v26M87 50v26M52 87h24" fill="none" stroke="#DDD6FE" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="30" cy="39" r="10" fill="#FFFFFF"/>
+  <circle cx="64" cy="39" r="10" fill="#C4B5FD"/>
+  <circle cx="98" cy="39" r="10" fill="#A7F3D0"/>
+  <path d="M45 88l12 12 27-31" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -48,6 +48,10 @@ class PluginLayoutTests(unittest.TestCase):
             self.assertLess(len(text.splitlines()), 500)
             openai_yaml = (skill.parent / "agents" / "openai.yaml").read_text(encoding="utf-8")
             self.assertIn(f"${name}", openai_yaml)
+            self.assertIn('icon_small: "./assets/icon.svg"', openai_yaml)
+            self.assertIn('icon_large: "./assets/logo.svg"', openai_yaml)
+            self.assertTrue((skill.parent / "assets" / "icon.svg").is_file())
+            self.assertTrue((skill.parent / "assets" / "logo.svg").is_file())
 
     def test_internal_eval_files_exist(self) -> None:
         for name in ("lifecycle", "project-init"):
@@ -75,6 +79,16 @@ class PluginLayoutTests(unittest.TestCase):
         self.assertEqual(entry["policy"]["installation"], "AVAILABLE")
         self.assertEqual(entry["policy"]["authentication"], "ON_INSTALL")
         self.assertEqual(entry["policy"]["products"], ["CODEX"])
+
+    def test_ci_dependencies_are_immutably_pinned(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        action_refs = re.findall(r"uses:\s*[^@\s]+@([^\s#]+)", workflow)
+        self.assertTrue(action_refs)
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs))
+        requirements = (ROOT / "requirements-ci.txt").read_text(encoding="utf-8")
+        self.assertIn("ruff==0.15.16", requirements)
+        self.assertGreaterEqual(requirements.count("--hash=sha256:"), 4)
+        self.assertIn("--require-hashes", workflow)
 
 
 if __name__ == "__main__":

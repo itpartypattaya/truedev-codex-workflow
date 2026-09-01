@@ -29,8 +29,8 @@ change.
   and a boolean compact flag. Free-form task, state, and transcript text is not elevated to developer context.
 - Approval transitions require the explicit `--user-confirmed` flag after a named user decision.
 - A missing compact event can be bypassed only with an explicit `release-compact --user-confirmed`
-  receipt. Gate-time shell exemptions are limited to narrow read-only commands without chaining or
-  redirection and refuse sensitive paths.
+  receipt. Gate-time evidence inspection goes through the bundled runner, which confines file reads
+  to non-sensitive regular files inside the Git root and disables external Git diff drivers.
   This is auditable workflow evidence, not cryptographic proof of human identity.
 - The runner does not pull, stage all, push, merge, reset, delete branches, or remove worktrees.
 - The plugin has no network client, telemetry, credential store, or MCP server.

@@ -4,6 +4,20 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.3] — 2026-09-01
+
+### Security
+- Replaced raw shell and Git gate exemptions with bounded, repository-confined runner inspection.
+- Resolve the authoritative Git root before considering standalone workflow state, preventing nested
+  state directories from shadowing an active repository.
+- Serialize workflow mutations with cross-platform advisory locks and fail malformed hook payloads
+  closed without tracebacks.
+- Expanded sensitive-path detection for SSH keys, Terraform state, Docker credentials, kubeconfig,
+  Composer auth, and common cloud credential files.
+- Pinned CI actions and the Ruff dependency by immutable hashes.
+- Added skill-local icon assets so Codex can load interface metadata without path warnings.
+- Keep advisory lock files inside Git metadata so a rejected start cannot dirty the working tree.
+
 ## [1.1.1] — 2026-09-01
 
 ### Fixed
