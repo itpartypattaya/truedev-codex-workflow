@@ -52,7 +52,9 @@ def make_link(link: Path, target: Path) -> bool:
     return True
 
 
-class AuditRoundFiveTests(unittest.TestCase):
+class WorkflowFixture(unittest.TestCase):
+    """Shared fixture; holds no tests of its own."""
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name).resolve()
@@ -106,6 +108,10 @@ class AuditRoundFiveTests(unittest.TestCase):
         )
         self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK", cwd=root)
         self.cli("lifecycle", "gate", "--step", "SCOPE", cwd=root)
+
+
+class AuditRoundFiveTests(WorkflowFixture):
+    """Fifth review round: links, sibling checkouts, output safety."""
 
     # 1. state directory redirected by a link or junction
     def test_linked_state_directory_is_refused_for_reads_and_writes(self) -> None:
@@ -255,3 +261,73 @@ class AuditRoundFiveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRoundSixTests(WorkflowFixture):
+    """Follow-up review: Windows launcher spelling, streamed index scan, review docs."""
+
+    def test_windows_py_launcher_is_accepted_without_an_explicit_version(self) -> None:
+        runner = str(RUNNER)
+        for launcher in ("py", "py -3", "py -3.11", "python", "python3", "python3.11"):
+            with self.subTest(launcher=launcher):
+                self.assertIsNotNone(
+                    workflow.SAFE_RUNNER_COMMAND.fullmatch(
+                        '%s "%s" inspect git-status' % (launcher, runner)
+                    ),
+                    launcher,
+                )
+        for rejected in ("pyt", "py -2", "py3", "pypy"):
+            with self.subTest(rejected=rejected):
+                self.assertIsNone(
+                    workflow.SAFE_RUNNER_COMMAND.fullmatch(
+                        '%s "%s" inspect git-status' % (rejected, runner)
+                    ),
+                    rejected,
+                )
+
+    def test_py_launcher_still_only_reaches_allowlisted_subcommands(self) -> None:
+        self.open_gate(self.root)
+        for command, allowed in (
+            ('py "%s" inspect git-status' % RUNNER, True),
+            ('py "%s" lifecycle finish --step PLAN' % RUNNER, False),
+            ('py "%s" inspect git-status && rm -rf x' % RUNNER, False),
+        ):
+            with self.subTest(command=command.split('" ', 1)[-1]):
+                _, output = self.hook(
+                    "pre-tool",
+                    {"cwd": str(self.root), "tool_name": "Bash",
+                     "tool_input": {"command": command}},
+                )
+                self.assertEqual(output.strip() == "", allowed)
+
+    def test_tracked_scan_streams_and_keeps_non_utf8_names_testable(self) -> None:
+        (self.root / "keep.txt").write_text("x\n", encoding="utf-8")
+        git(self.root, "add", "keep.txt")
+        git(self.root, "commit", "-m", "tracked file")
+        self.assertIn("keep.txt", list(workflow.iter_tracked_paths(self.root)))
+
+        # The stream must not decode a path with a replacement character, which would
+        # hide the very suffix the credential check relies on.
+        raw = b"deploy/id_rsa\0weird\xff.key\0"
+        decoded = []
+        pending = b""
+        for start in range(0, len(raw), 3):  # arbitrary chunk boundaries
+            pending += raw[start:start + 3]
+            *complete, pending = pending.split(b"\0")
+            decoded.extend(r.decode("utf-8", "surrogateescape") for r in complete if r)
+        self.assertEqual(len(decoded), 2)
+        self.assertTrue(all(workflow.is_sensitive_path(path) for path in decoded), decoded)
+        self.assertNotIn("�", "".join(decoded))
+
+    def test_tracked_scan_reports_git_failure_instead_of_returning_nothing(self) -> None:
+        broken = self.base / "not-a-repo"
+        broken.mkdir()
+        with self.assertRaises(workflow.WorkflowError):
+            list(workflow.iter_tracked_paths(broken))
+
+    def test_review_step_tells_the_agent_to_act_on_omitted_paths(self) -> None:
+        steps = (ROOT / "skills" / "lifecycle" / "references" / "steps.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("TrueDev omitted N sensitive path(s)", steps)
+        self.assertIn("unreviewed change rather than an absent one", steps)

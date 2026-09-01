@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 
 SCHEMA_VERSION = 4
@@ -67,7 +67,7 @@ HEX_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
 SAFE_RUNNER_COMMAND = re.compile(
-    r"^\s*(?:(?:python(?:3(?:\.\d+)?)?)|(?:py\s+-3))\s+"
+    r"^\s*(?:python(?:3(?:\.\d+)?)?|py(?:\s+-3(?:\.\d+)?)?)\s+"
     r"(?P<runner>\"[^\"]*truedev_workflow\.py\"|'[^']*truedev_workflow\.py'|\S*truedev_workflow\.py)\s+"
     r"(?:(?:lifecycle|project-init)\s+(?:status|validate)|"
     r"project-init\s+validate-slices(?:\s+--plan-dir\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+))?|"
@@ -91,11 +91,50 @@ def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
-def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _git_env() -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_OPTIONAL_LOCKS"] = "0"
     for name in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"):
         env.pop(name, None)
+    return env
+
+
+def iter_tracked_paths(root: Path) -> Iterator[str]:
+    """Stream tracked paths instead of buffering the whole index listing.
+
+    A large monorepo produces tens of megabytes here and the scan runs on every
+    preflight, so peak memory stays flat. `surrogateescape` also keeps a path that
+    is not valid UTF-8 testable instead of replacing the bytes that identify it.
+    """
+    command = ["git", "-C", str(root), "-c", "core.fsmonitor=false", "ls-files", "-z"]
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_git_env()
+        )
+    except OSError as exc:
+        raise WorkflowError(f"git ls-files failed: {exc}") from exc
+    pending = b""
+    stderr = b""
+    try:
+        for chunk in iter(lambda: process.stdout.read(65536), b""):
+            pending += chunk
+            *complete, pending = pending.split(b"\0")
+            for record in complete:
+                if record:
+                    yield record.decode("utf-8", "surrogateescape")
+        if pending:
+            yield pending.decode("utf-8", "surrogateescape")
+        stderr = process.stderr.read()
+    finally:
+        process.stdout.close()
+        process.stderr.close()
+        returncode = process.wait()
+    if returncode != 0:
+        raise WorkflowError(stderr.decode("utf-8", "replace").strip() or "git ls-files failed")
+
+
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = _git_env()
     command = ["git", "-C", str(root), "-c", "core.fsmonitor=false", *args]
     try:
         return subprocess.run(
@@ -112,10 +151,7 @@ def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _run_safe_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    for name in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"):
-        env.pop(name, None)
+    env = _git_env()
     command = [
             "git",
             "-C",
@@ -1180,10 +1216,7 @@ def git_preflight(args: argparse.Namespace) -> int:
             "high-confidence sensitive credential or transient paths present: "
             + ", ".join(sensitive)
         )
-    tracked_result = _run_git(root, "ls-files", "-z")
-    if tracked_result.returncode != 0:
-        raise WorkflowError(tracked_result.stderr.strip() or "git ls-files failed")
-    tracked_sensitive = [path for path in tracked_result.stdout.split("\0") if path and is_sensitive_path(path)]
+    tracked_sensitive = [path for path in iter_tracked_paths(root) if is_sensitive_path(path)]
     if tracked_sensitive:
         problems.append(
             "high-confidence sensitive credential or transient paths are tracked: "
