@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +100,12 @@ class WorkflowTests(unittest.TestCase):
         nested = self.root / "src" / "feature"
         (nested / workflow.STATE_DIR).mkdir(parents=True)
         self.assertEqual(workflow.find_repo_root(nested), self.root)
+
+    def test_normal_repo_root_lookup_does_not_spawn_git(self) -> None:
+        nested = self.root / "src" / "feature"
+        nested.mkdir(parents=True)
+        with mock.patch.object(workflow, "_run_git", side_effect=AssertionError("unexpected git")):
+            self.assertEqual(workflow.find_repo_root(nested), self.root)
 
     def test_no_state_is_inert(self) -> None:
         code, output, _ = self.hook(
@@ -201,7 +208,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(archives), 1)
         self.assertEqual(archives[0].read_bytes(), original)
 
-    def test_detached_head_status_and_recovery_remain_available(self) -> None:
+    def test_detached_head_status_remains_available_but_recovery_is_rejected(self) -> None:
         self.start_lifecycle()
         git(self.root, "checkout", "--detach", "HEAD")
 
@@ -221,9 +228,30 @@ class WorkflowTests(unittest.TestCase):
         code, _, error = self.cli(
             "lifecycle", "recover", "--accept-current-branch", "--user-confirmed"
         )
-        self.assertEqual(code, 0, error)
+        self.assertEqual(code, 2)
+        self.assertIn("switch to a named branch", error)
         state = workflow.load_state(self.root, "lifecycle")
-        self.assertEqual(state["branch"], workflow.DETACHED_HEAD)
+        self.assertEqual(state["branch"], "main")
+
+    def test_missing_git_metadata_keeps_status_recover_and_abandon_available(self) -> None:
+        self.start_lifecycle()
+        git_dir = self.root / ".git"
+        removed_git_dir = self.root / ".git-removed"
+        git_dir.rename(removed_git_dir)
+
+        code, output, error = self.cli("lifecycle", "status")
+        self.assertEqual(code, 0, error)
+        self.assertIn(f"active: {workflow.GIT_UNAVAILABLE}; MISMATCH", output)
+
+        code, _, error = self.cli(
+            "lifecycle", "recover", "--accept-current-branch", "--user-confirmed"
+        )
+        self.assertEqual(code, 0, error)
+        self.assertEqual(workflow.load_state(self.root, "lifecycle")["branch"], workflow.GIT_UNAVAILABLE)
+
+        code, _, error = self.cli("lifecycle", "abandon", "--user-confirmed")
+        self.assertEqual(code, 0, error)
+        self.assertFalse(workflow.state_path(self.root, "lifecycle").exists())
 
     def test_lifecycle_start_rejects_detached_head_with_start_specific_message(self) -> None:
         git(self.root, "checkout", "--detach", "HEAD")
@@ -388,8 +416,20 @@ class WorkflowTests(unittest.TestCase):
                 return
             self.assertEqual(self.cli("inspect", "file", "--path", "readme-link")[0], 2)
 
-    def test_malformed_hook_payload_fails_closed_without_traceback(self) -> None:
+    def test_malformed_hook_payload_is_inert_without_state_and_fails_closed_with_state(self) -> None:
         runner = ROOT / "scripts" / "truedev_workflow.py"
+        inert = subprocess.run(
+            [sys.executable, str(runner), "hook", "pre-tool"],
+            cwd=self.root,
+            input=json.dumps({"cwd": str(self.root), "tool_name": "mcp__unknown__read"}),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(inert.returncode, 0, inert.stderr)
+        self.assertEqual(inert.stdout, "")
+
+        self.start_lifecycle()
         result = subprocess.run(
             [sys.executable, str(runner), "hook", "pre-tool"],
             cwd=self.root,
@@ -499,7 +539,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("schema-validated", context)
 
     def test_slice_is_validated_and_restored_in_status_and_compact_context(self) -> None:
-        slice_ref = "docs/plan/slice-004-billing.md"
+        slice_ref = "planning/slice-004-billing.md"
         code, _, error = self.cli(
             "lifecycle", "start", "--task", "fixture", "--slice", slice_ref, "--base", "main"
         )
@@ -517,7 +557,7 @@ class WorkflowTests(unittest.TestCase):
             "lifecycle", "start", "--task", "fixture", "--slice", "../outside.md", "--base", "main"
         )
         self.assertEqual(code, 2)
-        self.assertIn("docs/plan/slice-*.md", error)
+        self.assertIn("<plan-dir>/slice-*.md", error)
 
     def test_schema_rejects_skipped_step(self) -> None:
         self.start_lifecycle()
@@ -605,10 +645,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertTrue(json.loads(output)["ok"])
 
-    def test_common_secret_file_names_are_sensitive(self) -> None:
+    def test_high_confidence_credential_paths_are_sensitive_without_common_name_false_positives(self) -> None:
         sensitive = (
-            "config/secrets.yaml",
-            "config/secrets.json",
             "app/credentials.json",
             "aws/credentials",
             "deploy/id_rsa",
@@ -627,7 +665,31 @@ class WorkflowTests(unittest.TestCase):
         )
         for path in sensitive:
             self.assertTrue(workflow.is_sensitive_path(path), path)
-        self.assertFalse(workflow.is_sensitive_path("server.crt"))
+        ordinary = (
+            "src/secrets.ts",
+            "lib/secrets.ts",
+            "src/secret/handler.ts",
+            "client_secret_helper.py",
+            "secrets.example.json",
+            "config/secrets.yaml",
+            "server.crt",
+        )
+        for path in ordinary:
+            self.assertFalse(workflow.is_sensitive_path(path), path)
+
+    def test_git_diff_inspection_redacts_sensitive_file_contents(self) -> None:
+        secret = self.root / ".env"
+        secret.write_text("TOKEN=old\n", encoding="utf-8")
+        git(self.root, "add", "-f", ".env")
+        git(self.root, "commit", "-m", "tracked secret fixture")
+        secret.write_text("TOKEN=do-not-print\n", encoding="utf-8")
+        (self.root / "README.md").write_text("safe change\n", encoding="utf-8")
+
+        code, output, error = self.cli("inspect", "git-diff")
+        self.assertEqual(code, 0, error)
+        self.assertIn("safe change", output)
+        self.assertNotIn("do-not-print", output)
+        self.assertNotIn("TOKEN=", output)
 
     def test_git_preflight_detects_rename_to_sensitive_path(self) -> None:
         source = self.root / "safe.txt"

@@ -43,7 +43,8 @@ the user's repository.
 - **bug or failing check:** reproduce it, trace the root cause, add the smallest regression test that
   fails for that cause, then make the narrowest fix. Keep these actions inside the normal ordered steps.
 - **recover after a branch change:** stop mutation, show the recorded and active branches, and use
-  `recover --accept-current-branch --user-confirmed` only after explicit approval.
+  `recover --accept-current-branch --user-confirmed` only after explicit approval. Never recover
+  onto detached HEAD; switch to a named branch first.
 - **invalid or obsolete state:** do not fabricate approvals. Offer `abandon --user-confirmed`, which
   preserves the original state in history before allowing a clean restart.
 - **compact event unavailable:** explain the missing host evidence and use
@@ -70,8 +71,11 @@ state file manually.
 7. Run:
 
 ```text
-python3 <RUNNER> lifecycle start --task "<task>" --slice "<slice-file>"
+python3 <RUNNER> lifecycle start --task "<task>" --slice "<plan-dir>/slice-NNN-name.md"
 ```
+
+`--slice` is a repository-relative path. It may use the default `docs/plan/` directory or the same
+custom plan directory passed to `project-init validate-slices --plan-dir`.
 
 8. Keep Codex's task plan synchronized with the current workflow step when a plan tool is available.
 
@@ -107,7 +111,8 @@ python3 <RUNNER> inspect file --path <repository-relative-non-sensitive-file>
 ```
 
 The file inspector accepts only regular UTF-8 files inside the Git root, rejects symlinks and
-sensitive paths, and caps output size. Chaining, redirection, and writes remain blocked.
+high-confidence credential paths, and caps output size. Git-diff inspection omits those paths from
+its output. Chaining, redirection, and writes remain blocked.
 
 ## Step order
 

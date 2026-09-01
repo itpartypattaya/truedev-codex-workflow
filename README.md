@@ -98,6 +98,12 @@ If no active state exists, the plugin is inert.
 While a gate is open, evidence reads use the bundled `inspect git-status`, `inspect git-diff`, and
 `inspect file` commands. Raw shell reads are blocked so Git helpers and PowerShell providers cannot
 turn a nominally read-only exemption into code execution or an out-of-repository read.
+The diff inspector omits high-confidence credential paths such as `.env`, private keys, credential
+stores, and transient workflow state; ordinary source names such as `src/secrets.ts` are not blocked.
+
+On Windows, the hook launcher reads `PLUGIN_ROOT` inside Python instead of assuming either Command
+Prompt `%VAR%` or PowerShell `$env:VAR` expansion. If the installation path is absent, the launcher
+is inert rather than turning a hook bootstrap error into a repository-wide tool denial.
 
 ## Git safety
 
@@ -105,7 +111,7 @@ The workflow does not automatically pull, stage all files, commit, push, create 
 delete branches, or remove worktrees. Before repository mutations it:
 
 1. discovers the real default and current branches;
-2. detects dirty or sensitive paths and in-progress Git operations;
+2. detects dirty or high-confidence credential/transient paths and in-progress Git operations;
 3. preserves unrelated user changes;
 4. requires explicit authority for external or destructive actions;
 5. stages only task-owned files when a commit is authorized.

@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/scripts/truedev_workflow.py\" hook session-start",
-            "commandWindows": "python \"$env:PLUGIN_ROOT\\scripts\\truedev_workflow.py\" hook session-start",
+            "commandWindows": "python -c \"import os,subprocess,sys; p=os.path.join(os.environ.get('PLUGIN_ROOT',''),'scripts','truedev_workflow.py'); sys.exit(subprocess.call([sys.executable,p,'hook','session-start']) if os.path.isfile(p) else 0)\"",
             "timeout": 15,
             "statusMessage": "Restoring validated TrueDev workflow state",
             "additionalContextLimit": 1200
@@ -23,7 +23,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/scripts/truedev_workflow.py\" hook pre-tool",
-            "commandWindows": "python \"$env:PLUGIN_ROOT\\scripts\\truedev_workflow.py\" hook pre-tool",
+            "commandWindows": "python -c \"import os,subprocess,sys; p=os.path.join(os.environ.get('PLUGIN_ROOT',''),'scripts','truedev_workflow.py'); sys.exit(subprocess.call([sys.executable,p,'hook','pre-tool']) if os.path.isfile(p) else 0)\"",
             "timeout": 15,
             "statusMessage": "Checking TrueDev workflow gate"
           }
@@ -36,7 +36,7 @@
           {
             "type": "command",
             "command": "python3 \"$PLUGIN_ROOT/scripts/truedev_workflow.py\" hook stop",
-            "commandWindows": "python \"$env:PLUGIN_ROOT\\scripts\\truedev_workflow.py\" hook stop",
+            "commandWindows": "python -c \"import os,subprocess,sys; p=os.path.join(os.environ.get('PLUGIN_ROOT',''),'scripts','truedev_workflow.py'); sys.exit(subprocess.call([sys.executable,p,'hook','stop']) if os.path.isfile(p) else 0)\"",
             "timeout": 15,
             "statusMessage": "Validating TrueDev workflow state"
           }

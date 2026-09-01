@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 import unittest
 
 
@@ -34,9 +37,61 @@ class PluginLayoutTests(unittest.TestCase):
             for group in event:
                 for handler in group["hooks"]:
                     self.assertIn("$PLUGIN_ROOT", handler["command"])
-                    self.assertIn("$env:PLUGIN_ROOT", handler["commandWindows"])
+                    self.assertIn("os.environ.get('PLUGIN_ROOT','')", handler["commandWindows"])
+                    self.assertIn("os.path.isfile(p) else 0", handler["commandWindows"])
+                    self.assertNotIn("$env:", handler["commandWindows"])
                     self.assertNotIn("%PLUGIN_ROOT%", handler["commandWindows"])
-                    self.assertTrue(handler["commandWindows"].startswith("python "))
+                    self.assertTrue(handler["commandWindows"].startswith('python -c "'))
+
+    @unittest.skipUnless(os.name == "nt", "Windows command-shell smoke test")
+    def test_windows_hook_launcher_runs_in_powershell_and_cmd(self) -> None:
+        config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        handler = config["hooks"]["PreToolUse"][0]["hooks"][0]
+        payload = json.dumps({"cwd": str(ROOT), "tool_name": "mcp__unknown__read"})
+        env = os.environ.copy()
+        env["PLUGIN_ROOT"] = str(ROOT)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            command_file = temp / "hook.cmd"
+            powershell_file = temp / "hook.ps1"
+            command_file.write_text("@echo off\r\n" + handler["commandWindows"] + "\r\n")
+            powershell_file.write_text(handler["commandWindows"] + "\n", encoding="utf-8")
+            for shell in (
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(powershell_file),
+                ],
+                ["cmd.exe", "/d", "/c", str(command_file)],
+            ):
+                result = subprocess.run(
+                    shell,
+                    cwd=ROOT,
+                    env=env,
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+
+            env.pop("PLUGIN_ROOT", None)
+            missing_root = subprocess.run(
+                ["cmd.exe", "/d", "/c", str(command_file)],
+                cwd=ROOT,
+                env=env,
+                input=payload,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=15,
+            )
+            self.assertEqual(missing_root.returncode, 0, missing_root.stderr)
 
     def test_skills_have_matching_names_and_stay_under_500_lines(self) -> None:
         for name in ("lifecycle", "project-init"):
