@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -69,6 +70,8 @@ class WorkflowFixture(unittest.TestCase):
         git(root, "init", "-b", "main")
         git(root, "config", "user.email", "test@example.invalid")
         git(root, "config", "user.name", "TrueDev Test")
+        # A background `gc --auto` keeps .git busy and breaks temp-directory cleanup.
+        git(root, "config", "gc.auto", "0")
         (root / "README.md").write_text("fixture\n", encoding="utf-8")
         (root / ".gitignore").write_text(".truedev-workflow/\n", encoding="utf-8")
         git(root, "add", "README.md", ".gitignore")
@@ -331,3 +334,92 @@ class ReviewRoundSixTests(WorkflowFixture):
         )
         self.assertIn("TrueDev omitted N sensitive path(s)", steps)
         self.assertIn("unreviewed change rather than an absent one", steps)
+
+
+class ReviewRoundSevenTests(WorkflowFixture):
+    """Follow-up review: child submodules, pathspec budget, compact guidance."""
+
+    def add_submodule(self, parent: Path, child: Path, at: str) -> Path:
+        done = subprocess.run(
+            ["git", "-C", str(parent), "-c", "protocol.file.allow=always", "submodule", "add",
+             str(child).replace("\\", "/"), at],
+            capture_output=True, text=True,
+        )
+        target = parent / at
+        if not target.is_dir():
+            self.skipTest("submodule add unavailable: %s" % done.stderr.strip()[:60])
+        git(parent, "commit", "-am", "add submodule")
+        return target
+
+    def test_gate_inside_a_submodule_stops_work_in_the_parent(self) -> None:
+        child = self.make_repo("child")
+        nested = self.add_submodule(self.root, child, "vendor/child")
+        self.open_gate(nested)
+        self.assertEqual(self.mutation_verdict(nested), "DENY")
+        self.assertEqual(self.mutation_verdict(self.root), "DENY")
+
+    def test_gitmodules_paths_are_confined_to_the_repository(self) -> None:
+        (self.root / ".gitmodules").write_text(
+            '[submodule "a"]\n\tpath = ../../escape\n'
+            '[submodule "b"]\n\tpath = /absolute\n'
+            '[submodule "c"]\n\tpath = ok/child\n',
+            encoding="utf-8",
+        )
+        found = workflow._submodule_paths(self.root)
+        self.assertEqual([p.name for p in found], ["child"])
+        self.assertEqual(found[0], self.root / "ok" / "child")
+
+    def test_repository_without_gitmodules_scans_no_children(self) -> None:
+        self.assertEqual(workflow._submodule_paths(self.root), [])
+
+    def test_oversized_exclusion_list_refuses_instead_of_truncating(self) -> None:
+        # The budget is measured in bytes, so a few deeply nested names reach it
+        # without the churn of hundreds of files.
+        deep = "/".join("nested-directory-level-%02d" % level for level in range(6))
+        areas = [self.root / (deep + "/area-%02d" % index) for index in range(60)]
+        for area in areas:
+            area.mkdir(parents=True, exist_ok=True)
+            (area / ".env").write_text("SECRET=1\n", encoding="utf-8")
+            (area / "code.txt").write_text("v1\n", encoding="utf-8")
+        git(self.root, "add", "-Af")
+        git(self.root, "commit", "-m", "seed")
+        for area in areas:
+            (area / ".env").write_text("changed\n", encoding="utf-8")
+            (area / "code.txt").write_text("v2\n", encoding="utf-8")
+
+        code, output, error = self.cli("inspect", "git-diff", "--stat")
+        self.assertEqual(code, 2, error)
+        self.assertIn("exceed the command-line limit", output)
+        # A partial diff would be the silent omission the notice exists to prevent.
+        self.assertNotIn("code.txt", output)
+        self.assertNotIn("Traceback", error)
+
+    def test_compact_denial_points_at_the_manual_release(self) -> None:
+        self.cli("lifecycle", "start", "--task", "x", "--base", "main")
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        self.cli("lifecycle", "approve", "--step", "SCOPE", "--user-confirmed")
+        self.cli("lifecycle", "finish", "--step", "PLAN")
+
+        _, output = self.hook(
+            "pre-tool",
+            {"cwd": str(self.root), "tool_name": "Bash", "tool_input": {"command": "rm -rf x"}},
+        )
+        reason = json.loads(output)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("release-compact --user-confirmed", reason)
+
+        _, output = self.hook("stop", {"cwd": str(self.root)})
+        self.assertIn("release-compact --user-confirmed", json.loads(output)["reason"])
+
+    def test_abandon_tolerates_a_state_file_removed_underneath_it(self) -> None:
+        self.cli("lifecycle", "start", "--task", "x", "--base", "main")
+        original = workflow._archive_raw_state
+
+        def archive_then_remove(root: Path, workflow_name: str, label: str) -> Path:
+            destination = original(root, workflow_name, label)
+            workflow.state_path(root, workflow_name).unlink()
+            return destination
+
+        with mock.patch.object(workflow, "_archive_raw_state", side_effect=archive_then_remove):
+            code, _, error = self.cli("lifecycle", "abandon", "--user-confirmed")
+        self.assertEqual(code, 0, error)

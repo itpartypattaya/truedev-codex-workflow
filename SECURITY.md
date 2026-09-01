@@ -18,6 +18,15 @@ paths that do not emit the same hook event. Multiple matching hooks may also sta
 Users must therefore treat the hook as a guardrail and review it through `/hooks` after every hash
 change.
 
+The shipped matcher enumerates the tool names Codex documents as able to change a repository:
+`Bash`, `apply_patch` with its `Edit` and `Write` aliases, `Agent` and `spawn_agent`, and `mcp__*`.
+A tool name introduced after this release would not match and would not be gated. To close that
+residual risk rather than enumerate it, change the `PreToolUse` matcher in `hooks/hooks.json` to
+`.*` and re-trust the hook through `/hooks`. This is a deliberate trade: the hook costs roughly half
+a second per invocation on Windows, dominated by interpreter startup, and `.*` applies that cost to
+every tool call including read-only ones. The enumerated default keeps read-heavy sessions
+responsive; `.*` is the safer setting for an untrusted repository.
+
 ## Data and command boundaries
 
 - Hook input is accepted as JSON on standard input and schema-checked before use.

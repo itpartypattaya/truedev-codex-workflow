@@ -27,6 +27,9 @@ SCHEMA_VERSION = 4
 MAX_STATE_BYTES = 1024 * 1024
 MAX_HOOK_BYTES = 1024 * 1024
 MAX_INSPECT_FILE_BYTES = 1024 * 1024
+# Windows caps a command line near 32 KiB; stay far below it with room for the
+# interpreter, the runner path, and the diff flags.
+MAX_PATHSPEC_BYTES = 8000
 LOCK_TIMEOUT_SECONDS = 5.0
 DETACHED_HEAD = "(detached)"
 GIT_UNAVAILABLE = "(git-unavailable)"
@@ -987,7 +990,7 @@ def abandon_workflow(workflow: str, *, user_confirmed: bool) -> int:
     root = _repo_root_or_error()
     source = state_path(root, workflow)
     destination = _archive_raw_state(root, workflow, "abandoned")
-    source.unlink()
+    source.unlink(missing_ok=True)
     print(f"Abandoned {workflow}; preserved the original state at {destination}")
     return 0
 
@@ -1182,7 +1185,7 @@ def archive_workflow(workflow: str) -> int:
     if destination.exists():
         raise WorkflowError(f"archive destination already exists: {destination}")
     _atomic_write(destination, state)
-    source.unlink()
+    source.unlink(missing_ok=True)
     print(f"Archived {workflow} receipt: {destination}")
     return 0
 
@@ -1291,12 +1294,18 @@ def inspect_git(args: argparse.Namespace) -> int:
                 return 0
             # Subtracting the withheld paths keeps the command line bounded by the number
             # of omitted files instead of the size of the whole change set.
-            command = (
-                *command_parts,
-                "--",
-                ".",
-                *(f":(exclude,literal){path}" for path in omitted),
-            )
+            exclusions = [f":(exclude,literal){path}" for path in omitted]
+            if sum(len(item) + 1 for item in exclusions) > MAX_PATHSPEC_BYTES:
+                # Refuse rather than truncate. A partially excluded diff would be exactly
+                # the silent omission this notice exists to prevent, and an over-long
+                # command line fails with an opaque operating-system error instead.
+                print(
+                    "# TrueDev cannot render this diff: excluding that many sensitive "
+                    "paths would exceed the command-line limit. Narrow the change set, "
+                    "or read individual files with inspect file."
+                )
+                return 2
+            command = (*command_parts, "--", ".", *exclusions)
         else:
             command = tuple(command_parts)
     else:
@@ -1492,6 +1501,19 @@ def related_roots(root: Path) -> list[Path]:
         ):
             seen.add(parent)
             roots.append(parent)
+    for child in _submodule_paths(root):
+        try:
+            resolved = child.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        if any(
+            (resolved / STATE_DIR / name).exists()
+            for name in (LIFECYCLE_FILE, PROJECT_INIT_FILE)
+        ):
+            seen.add(resolved)
+            roots.append(resolved)
     if not _may_have_linked_worktrees(root):
         return roots
     listing = _run_git(root, "worktree", "list", "--porcelain")
@@ -1509,6 +1531,33 @@ def related_roots(root: Path) -> list[Path]:
     return roots
 
 
+def _submodule_paths(root: Path) -> list[Path]:
+    """Declared submodule checkouts, read from .gitmodules without spawning Git.
+
+    Ancestors cover a submodule looking outward; this covers the parent looking in,
+    so a gate opened inside a submodule also stops work done from the parent.
+    """
+    config = root / ".gitmodules"
+    if not config.is_file() or _is_link(config):
+        return []
+    try:
+        text = config.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    found: list[Path] = []
+    for line in text.splitlines():
+        key, separator, value = line.strip().partition("=")
+        if not separator or key.strip().lower() != "path":
+            continue
+        relative = PurePosixPath(value.strip().replace(chr(92), "/"))
+        if not value.strip() or relative.is_absolute():
+            continue
+        if any(part in {"", ".", ".."} for part in relative.parts):
+            continue
+        found.append(root.joinpath(*relative.parts))
+    return found
+
+
 def _may_have_linked_worktrees(root: Path) -> bool:
     """Avoid spawning Git for the common case of a single ordinary checkout."""
     marker = root / ".git"
@@ -1524,7 +1573,9 @@ def _gate_decision(states: Sequence[tuple[str, Mapping[str, Any]]], scope: str) 
         if workflow == "lifecycle" and state.get("awaiting_compact"):
             return (
                 f"TrueDev compact gate is active before {current}{scope}. "
-                "Compact the Codex task, then retry."
+                "Compact the Codex task and retry. If this Codex build never emits a "
+                "compact event, the user can release it deliberately with: "
+                "lifecycle release-compact --user-confirmed"
             )
         if state["steps"][current]["status"] == "awaiting_approval":
             return (
@@ -1657,7 +1708,12 @@ def hook_stop() -> int:
             return _emit(
                 {
                     "decision": "block",
-                    "reason": f"TrueDev compact gate is active before {current}. Ask the user to compact the task.",
+                    "reason": (
+                        f"TrueDev compact gate is active before {current}. Ask the user to "
+                        "compact the task, or to release the gate deliberately with "
+                        "lifecycle release-compact --user-confirmed if this build emits no "
+                        "compact event."
+                    ),
                 }
             )
     return 0
