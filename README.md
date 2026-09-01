@@ -79,6 +79,11 @@ specification
 `project-init` produces the plan once. `lifecycle` then runs per slice. Five of its ten steps are
 gates that wait for you: SCOPE, COMPONENTS, VERIFY, REVIEW, and CLOSE.
 
+The pieces fit together like this. The agent drives the skills, the skills drive the runner, the
+runner owns the state file, and the hooks sit in front of every tool call to check the current gate:
+
+![How TrueDev fits together: hooks, agent, skills, and the state machine](docs/images/architecture.png)
+
 After PLAN the lifecycle asks you to compact the Codex session, because the plan is long and the
 implementation should not carry it. Compacting clears that gate and hands the next session a short
 summary — the workflow name, the current step, its status, and the slice file. Your task text and
