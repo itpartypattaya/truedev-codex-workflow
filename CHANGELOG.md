@@ -4,6 +4,27 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.5] — 2026-09-01
+
+### Security
+- Hook launchers now require an absolute installed `PLUGIN_ROOT`, so an unset or relative value can
+  no longer resolve to a `scripts/truedev_workflow.py` inside the repository under review.
+- Both platforms use the same shell-neutral launcher, so a missing installation path is inert
+  everywhere instead of denying every tool call on POSIX and running nothing on Windows.
+- A relative runner in a gate-exempt command is resolved against the tool call's own working
+  directory again; resolving it against the repository root approved one file while a different one
+  would execute.
+- A workflow bound to the `(detached)` or `(git-unavailable)` placeholder never satisfies the branch
+  guard, and recovery refuses to record either placeholder as the active branch.
+
+### Fixed
+- Restored detection of conventional secret stores (`secrets/` directories, `secret(s).yaml|json|toml`
+  and similar data files) while keeping ordinary source names such as `secrets.ts` unflagged.
+- The diff inspector now names the paths it withholds instead of returning a silently shortened diff,
+  and excludes them by pathspec so the command line no longer grows with the change set.
+- `inspect git-diff --check` reports whitespace findings through its exit status instead of failing
+  as if the inspection itself broke.
+
 ## [1.1.4] — 2026-09-01
 
 ### Fixed

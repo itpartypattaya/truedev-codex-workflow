@@ -32,6 +32,13 @@ change.
   receipt. Gate-time evidence inspection goes through the bundled runner, which confines file reads
   to non-sensitive regular files inside the Git root and disables external Git diff drivers.
   This is auditable workflow evidence, not cryptographic proof of human identity.
+- Hook launchers run only an absolute installed path. An unset or relative `PLUGIN_ROOT` makes the
+  launcher inert on every platform; it never falls back to a same-named script inside the repository
+  under review.
+- A gate-exempt command that names the runner by a relative path is judged against the working
+  directory of that tool call, which is the directory the command shell will use.
+- Branch placeholders such as `(detached)` and `(git-unavailable)` identify no commit. They are
+  never recorded by recovery and never satisfy the branch guard.
 - The runner does not pull, stage all, push, merge, reset, delete branches, or remove worktrees.
 - The plugin has no network client, telemetry, credential store, or MCP server.
 

@@ -15,8 +15,10 @@ an OS advisory lock and validates these invariants before every atomic replace:
 - `COMPONENTS` alone may complete with `outcome: not_applicable` and one deterministic skip receipt
   when the work has no UI surface.
 - Lifecycle transitions and mutation hooks require the active Git branch to match the branch recorded
-  at workflow start. Status remains readable and labels a mismatch for recovery. Detached HEAD may
-  not become the recovered branch because the string `(detached)` does not identify a commit.
+  at workflow start. Status remains readable and labels a mismatch for recovery. The placeholders
+  `(detached)` and `(git-unavailable)` identify no commit, so they can never be recorded by recovery
+  and never satisfy the branch guard; a workflow already bound to one stays blocked until it is
+  recovered onto a named branch or abandoned.
 - `awaiting_compact` is boolean and is cleared by a validated compact-session hook or an explicit
   `release-compact --user-confirmed` receipt when the host event is unavailable.
 - History contains transition metadata, not free-form prompts or repository content.

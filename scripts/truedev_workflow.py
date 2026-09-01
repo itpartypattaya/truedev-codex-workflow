@@ -30,6 +30,7 @@ MAX_INSPECT_FILE_BYTES = 1024 * 1024
 LOCK_TIMEOUT_SECONDS = 5.0
 DETACHED_HEAD = "(detached)"
 GIT_UNAVAILABLE = "(git-unavailable)"
+BRANCH_SENTINELS = frozenset({DETACHED_HEAD, GIT_UNAVAILABLE})
 STATE_DIR = ".truedev-workflow"
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -563,6 +564,13 @@ def current_branch(root: Path) -> str:
 def require_lifecycle_branch(root: Path, state: Mapping[str, Any]) -> None:
     recorded = _validate_text(state.get("branch"), "branch", maximum=255)
     active = current_branch(root)
+    if recorded in BRANCH_SENTINELS:
+        # A sentinel never identifies a commit, so it must not satisfy the guard even
+        # when the current lookup reports the same placeholder.
+        raise BranchMismatchError(
+            f"lifecycle is bound to the placeholder {recorded!r} instead of a real branch; "
+            "restore Git metadata and recover onto a named branch, or abandon the workflow"
+        )
     if active != recorded:
         raise BranchMismatchError(
             f"lifecycle started on branch {recorded!r}, but the active branch is {active!r}; "
@@ -600,6 +608,46 @@ def _lock_named_workflow(function):
     return locked
 
 
+SECRET_STORE_DIRS = frozenset({"secrets"})
+SECRET_FILE_STEMS = frozenset({"secret", "secrets"})
+# Extensions that carry configuration data rather than program text.
+SECRET_DATA_SUFFIXES = frozenset(
+    {"cfg", "conf", "env", "ini", "json", "properties", "toml", "txt", "yaml", "yml"}
+)
+# Extensions that are program text or documentation; a file named `secrets.ts` is a
+# module, not a credential store.
+NON_SECRET_SUFFIXES = frozenset(
+    {
+        "adoc", "bash", "c", "cc", "cjs", "clj", "cpp", "cs", "css", "erl", "ex", "exs",
+        "go", "gradle", "h", "hpp", "html", "java", "js", "json5", "jsx", "kt", "kts",
+        "lock", "lua", "md", "mdx", "mjs", "php", "pl", "ps1", "psm1", "py", "pyi", "r",
+        "rb", "rs", "rst", "scala", "scss", "sh", "sql", "svelte", "swift", "tf", "ts",
+        "tsx", "vue", "zsh",
+    }
+)
+# Qualifiers that mark a checked-in placeholder rather than a real credential file.
+NON_SECRET_QUALIFIERS = frozenset(
+    {
+        "dist", "example", "fixture", "fixtures", "mock", "sample", "schema", "spec",
+        "template", "test", "tests",
+    }
+)
+
+
+def _is_secret_store_file(parts: Sequence[str]) -> bool:
+    """Detect conventional secret stores without flagging ordinary source names."""
+    basename = parts[-1]
+    segments = basename.split(".")
+    suffix = segments[-1] if len(segments) > 1 else ""
+    if suffix in NON_SECRET_SUFFIXES:
+        return False
+    if any(segment in NON_SECRET_QUALIFIERS for segment in segments[1:-1]):
+        return False
+    if any(directory in SECRET_STORE_DIRS for directory in parts[:-1]):
+        return True
+    return segments[0] in SECRET_FILE_STEMS and suffix in SECRET_DATA_SUFFIXES
+
+
 def is_sensitive_path(path: str) -> bool:
     normalized = path.replace("\\", "/").strip('"').lower()
     parts = [part for part in normalized.split("/") if part]
@@ -620,6 +668,8 @@ def is_sensitive_path(path: str) -> bool:
         "terraform.tfstate",
         "terraform.tfstate.backup",
     }:
+        return True
+    if _is_secret_store_file(parts):
         return True
     if re.fullmatch(r"credentials(?:\.(?:json|ya?ml|toml|ini))?", basename):
         return True
@@ -659,6 +709,8 @@ def lifecycle_start(args: argparse.Namespace) -> int:
     branch = current_branch(root)
     if branch == DETACHED_HEAD:
         raise WorkflowError("detached HEAD is not supported by lifecycle start; switch to a named branch")
+    if branch in BRANCH_SENTINELS:
+        raise WorkflowError(f"lifecycle start requires a named branch, but Git reported {branch}")
     slice_ref = _validate_slice_ref(args.slice) if args.slice is not None else None
     state: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -848,6 +900,11 @@ def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: boo
     if active == DETACHED_HEAD:
         raise WorkflowError(
             "cannot recover lifecycle onto detached HEAD; switch to a named branch first"
+        )
+    if active == GIT_UNAVAILABLE:
+        raise WorkflowError(
+            "cannot recover lifecycle while Git metadata is unavailable; restore the repository "
+            "first, or abandon the workflow with --user-confirmed"
         )
     if active == state["branch"]:
         raise WorkflowError("lifecycle already matches the active branch; no recovery is needed")
@@ -1104,22 +1161,45 @@ def inspect_git(args: argparse.Namespace) -> int:
         names = _run_safe_git(root, *command_parts, "--name-only", "-z", "--")
         if names.returncode != 0:
             raise WorkflowError(names.stderr.strip() or "git diff path inspection failed")
-        safe_paths = [
-            path for path in names.stdout.split("\0") if path and not is_sensitive_path(path)
-        ]
-        if not safe_paths:
-            return 0
+        changed = [path for path in names.stdout.split("\0") if path]
+        omitted = sorted({path for path in changed if is_sensitive_path(path)})
         for flag in ("staged", "stat", "check", "name_only", "name_status"):
             if flag != "staged" and getattr(args, flag):
                 command_parts.append("--" + flag.replace("_", "-"))
-        literal_paths = [f":(literal){path}" for path in safe_paths]
-        command = (*command_parts, "--", *literal_paths)
+        if omitted:
+            # Never let a silent omission read as a complete diff: the reviewer must be
+            # able to tell "nothing changed" from "the change was withheld".
+            print(
+                f"# TrueDev omitted {len(omitted)} sensitive path(s) from this diff: "
+                + ", ".join(omitted)
+            )
+            if len(omitted) == len(changed):
+                return 0
+            # Subtracting the withheld paths keeps the command line bounded by the number
+            # of omitted files instead of the size of the whole change set.
+            command = (
+                *command_parts,
+                "--",
+                ".",
+                *(f":(exclude,literal){path}" for path in omitted),
+            )
+        else:
+            command = tuple(command_parts)
     else:
         raise WorkflowError(f"unsupported inspection command: {args.inspect_command}")
     result = _run_safe_git(root, *command)
     if result.stdout:
         print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
     if result.returncode != 0:
+        if (
+            args.inspect_command == "git-diff"
+            and getattr(args, "check", False)
+            and result.stdout
+        ):
+            # `git diff --check` reports whitespace findings through a non-zero status
+            # while printing them. That is evidence for the gate, not a failure of the
+            # inspection itself; a real failure produces no findings on stdout.
+            return 2
         raise WorkflowError(result.stderr.strip() or f"git {command[0]} inspection failed")
     return 0
 
@@ -1229,7 +1309,7 @@ def _deny(reason: str) -> int:
     )
 
 
-def _is_safe_gate_command(payload: Mapping[str, Any], root: Path) -> bool:
+def _is_safe_gate_command(payload: Mapping[str, Any]) -> bool:
     if payload.get("tool_name") != "Bash":
         return False
     tool_input = payload.get("tool_input")
@@ -1244,7 +1324,16 @@ def _is_safe_gate_command(payload: Mapping[str, Any], root: Path) -> bool:
     runner = match.group("runner").strip("\"'")
     candidate = Path(runner)
     if not candidate.is_absolute():
-        candidate = root / candidate
+        # The shell resolves a relative runner against the tool call's own working
+        # directory, not against the repository root. Checking any other base would
+        # approve one file while a different one executes.
+        cwd = payload.get("cwd")
+        if not isinstance(cwd, str) or not cwd.strip():
+            return False
+        try:
+            candidate = Path(cwd) / candidate
+        except (TypeError, ValueError):
+            return False
     try:
         return candidate.resolve() == Path(__file__).resolve()
     except OSError:
@@ -1268,7 +1357,7 @@ def hook_pre_tool() -> int:
     payload, root = _hook_context("pre-tool")
     if payload is None or root is None:
         return 0
-    if _is_safe_gate_command(payload, root):
+    if _is_safe_gate_command(payload):
         return 0
     try:
         states = _active_states(root)
