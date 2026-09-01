@@ -1,5 +1,10 @@
 # Independent release benchmark
 
+> **These results are stale.** They were produced for version 1.0.0 at commit `c9fd28b`.
+> The skills and the runner have changed substantially since, so the numbers below do not
+> describe the current release. Rerun the suite from the release SHA before publishing, and
+> verify with `python scripts/validate_release.py --require-current-evidence`.
+
 One ephemeral run per case and configuration; an independent Codex judge graded every assertion.
 
 | Configuration | Pass rate | Mean time | Mean tokens |

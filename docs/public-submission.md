@@ -68,18 +68,23 @@ Negative cases:
 ```text
 python -m unittest discover -s tests -v
 ruff check .
-python scripts/validate_release.py
+python scripts/validate_release.py --require-current-evidence
 python scripts/package_plugin.py
 ```
 
-Upload `dist/truedev-workflow-1.1.8.zip` as **Skills only** after running a fresh installed-plugin
+`--require-current-evidence` fails unless `evals/results/benchmark.json` records the version being
+released. The published results were produced for 1.0.0 at `c9fd28b`, so the eval suite must be
+rerun from the release SHA before this gate passes. Do not submit the older numbers as evidence for
+a newer build.
+
+Upload `dist/truedev-workflow-1.1.9.zip` as **Skills only** after running a fresh installed-plugin
 smoke test from the exact release SHA.
 
 ## Publisher-owned steps
 
 These cannot be proven by repository tests:
 
-- merge the release commit into `main`, publish the legal URLs, and tag `v1.1.8`;
+- merge the release commit into `main`, publish the legal URLs, and tag `v1.1.9`;
 - install the final package in a fresh Codex task and review/trust the hook hash;
 - confirm the two skills and three hooks load from the installed copy;
 - run the eight reviewer cases and retain outputs from the final release SHA;

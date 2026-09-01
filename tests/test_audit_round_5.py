@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
+import importlib.util
 import io
 import json
 import os
@@ -20,6 +21,24 @@ import truedev_workflow as workflow  # noqa: E402
 
 RUNNER = ROOT / "scripts" / "truedev_workflow.py"
 EMOJI = "\U0001f600"
+
+
+def load_release_validator():
+    spec = importlib.util.spec_from_file_location(
+        "validate_release", ROOT / "scripts" / "validate_release.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_eval_runner():
+    spec = importlib.util.spec_from_file_location(
+        "run_release_evals", ROOT / "evals" / "run_release_evals.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @contextmanager
@@ -423,3 +442,132 @@ class ReviewRoundSevenTests(WorkflowFixture):
         with mock.patch.object(workflow, "_archive_raw_state", side_effect=archive_then_remove):
             code, _, error = self.cli("lifecycle", "abandon", "--user-confirmed")
         self.assertEqual(code, 0, error)
+
+
+class ReviewRoundEightTests(WorkflowFixture):
+    """Follow-up review: shell chaining, tampered state, sibling drift, CLOSE order."""
+
+    def test_single_ampersand_cannot_smuggle_a_second_command(self) -> None:
+        runner = str(RUNNER)
+        for tail in (
+            "git-preflight --expected-branch main&whoami",
+            "inspect file --path a.txt&calc",
+            "project-init validate-slices --plan-dir docs&notepad",
+            "git-preflight --expected-branch main&&whoami",
+            "git-preflight --expected-branch main|tee x",
+        ):
+            with self.subTest(tail=tail):
+                self.assertFalse(
+                    workflow._is_safe_gate_command({
+                        "tool_name": "Bash", "cwd": str(self.root),
+                        "tool_input": {"command": 'python "%s" %s' % (runner, tail)},
+                    }),
+                    tail,
+                )
+
+    def test_legitimate_arguments_still_pass_the_allowlist(self) -> None:
+        runner = str(RUNNER)
+        for tail in (
+            "inspect file --path src/a.txt",
+            'inspect file --path "src/my file.txt"',
+            "git-preflight --expected-branch feature/x-1",
+            "project-init validate-slices --plan-dir docs/plan",
+        ):
+            with self.subTest(tail=tail):
+                self.assertTrue(
+                    workflow._is_safe_gate_command({
+                        "tool_name": "Bash", "cwd": str(self.root),
+                        "tool_input": {"command": 'python "%s" %s' % (runner, tail)},
+                    }),
+                    tail,
+                )
+
+    def test_broken_state_link_denies_instead_of_reading_as_absent(self) -> None:
+        self.open_gate(self.root)
+        self.assertEqual(self.mutation_verdict(self.root), "DENY")
+        state = workflow.state_path(self.root, "lifecycle")
+        state.unlink()
+        try:
+            state.symlink_to(self.root / "nowhere.json")
+        except (OSError, NotImplementedError):
+            self.skipTest("file symlinks are unavailable in this environment")
+        self.assertFalse(state.exists())
+        self.assertTrue(workflow._state_is_present(state))
+        self.assertEqual(self.mutation_verdict(self.root), "DENY")
+
+    def test_branch_drift_in_a_sibling_worktree_denies(self) -> None:
+        self.open_gate(self.root)
+        linked = self.base / "linked"
+        git(self.root, "worktree", "add", str(linked), "-b", "feature")
+        self.assertEqual(self.mutation_verdict(linked), "DENY")
+        git(self.root, "checkout", "-q", "-b", "moved")
+        _, output = self.hook(
+            "pre-tool",
+            {"cwd": str(linked), "tool_name": "Bash", "tool_input": {"command": "rm -rf x"}},
+        )
+        self.assertNotEqual(output.strip(), "", "gate bypassed by moving the gated checkout")
+        reason = json.loads(output)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("bound to another branch", reason)
+
+    def test_state_ignore_rule_must_cover_the_whole_directory(self) -> None:
+        (self.root / ".gitignore").write_text(
+            ".truedev-workflow/lifecycle.json\n", encoding="utf-8"
+        )
+        code, _, error = self.cli("lifecycle", "start", "--task", "x", "--base", "main")
+        self.assertEqual(code, 2)
+        self.assertIn("not ignored by Git", error)
+        self.assertIn("history", error)
+
+        (self.root / ".gitignore").write_text(".truedev-workflow/\n", encoding="utf-8")
+        code, _, error = self.cli("lifecycle", "start", "--task", "x", "--base", "main")
+        self.assertEqual(code, 0, error)
+
+    def test_archive_names_do_not_collide_within_one_second(self) -> None:
+        stamps = set()
+        for _ in range(5):
+            self.cli("lifecycle", "start", "--task", "x", "--base", "main")
+            for step in workflow.LIFECYCLE_STEPS:
+                if step in workflow.LIFECYCLE_USER_GATES:
+                    self.cli("lifecycle", "gate", "--step", step)
+                    self.cli("lifecycle", "approve", "--step", step, "--user-confirmed")
+                else:
+                    self.cli("lifecycle", "finish", "--step", step)
+                self.cli("lifecycle", "release-compact", "--user-confirmed")
+            code, _, error = self.cli("lifecycle", "archive")
+            self.assertEqual(code, 0, error)
+        history = sorted((self.root / workflow.STATE_DIR / "history").glob("*-lifecycle.json"))
+        stamps.update(path.name for path in history)
+        self.assertEqual(len(stamps), 5, sorted(stamps))
+
+    def test_close_step_documents_an_order_the_hook_permits(self) -> None:
+        steps = (ROOT / "skills" / "lifecycle" / "references" / "steps.md").read_text(
+            encoding="utf-8"
+        )
+        close = steps.split("## CLOSE")[1]
+        record = close.index("approve --step CLOSE --user-confirmed")
+        act = close.index("perform exactly the actions the user authorized")
+        self.assertLess(record, act, "approval must be recorded before the close actions run")
+
+    def test_release_gate_rejects_evidence_from_another_version(self) -> None:
+        validator = load_release_validator()
+        manifest = validator.validate()
+        with self.assertRaisesRegex(validator.ReleaseValidationError, "rerun the eval suite"):
+            validator.validate(require_current_evidence=True)
+        self.assertEqual(manifest["name"], "truedev-workflow")
+
+    def test_eval_resume_rejects_a_run_whose_inputs_changed(self) -> None:
+        runner = load_eval_runner()
+        item = {"id": "x", "prompt": "p", "assertions": [], "skill": "lifecycle"}
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            run_dir = workspace / "x" / "with_skill"
+            (run_dir / "outputs").mkdir(parents=True)
+            (run_dir / "outputs" / "response.md").write_text("answer\n", encoding="utf-8")
+            timing = {
+                "exit_code": 0, "output_valid": True, "completed": True,
+                "input_fingerprint": runner.input_fingerprint(item, "with_skill"),
+            }
+            (run_dir / "timing.json").write_text(json.dumps(timing), encoding="utf-8")
+            self.assertTrue(runner.completed_run(workspace, "x", "with_skill", item))
+            changed = dict(item, prompt="a different question")
+            self.assertFalse(runner.completed_run(workspace, "x", "with_skill", changed))

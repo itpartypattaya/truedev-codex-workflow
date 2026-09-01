@@ -10,7 +10,9 @@ files; conversation context is not the source of truth.
 
 ## Requirements
 
-Require Python 3.9 or newer. Use Git when available for repository-root discovery and auditability.
+Require Python 3.9 or newer and Git. `project-init start` resolves the repository root through
+Git and refuses to begin unless `.truedev-workflow/` is Git-ignored, so Git is a hard
+requirement rather than an optional convenience.
 
 ## Locate the bundled runner
 
