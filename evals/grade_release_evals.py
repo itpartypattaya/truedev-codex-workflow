@@ -20,6 +20,19 @@ RESULTS = ROOT / "evals" / "results"
 SCHEMA = ROOT / "evals" / "grading-schema.json"
 
 
+def _manifest_version() -> str:
+    manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    return str(manifest.get("version", "unknown"))
+
+
+def _source_commit() -> str:
+    """Record which tree produced this evidence, so staleness is detectable later."""
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
 def load_runs(workspace: Path) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for item in load_evals():
@@ -27,8 +40,10 @@ def load_runs(workspace: Path) -> list[dict[str, Any]]:
             run_dir = workspace / item["id"] / configuration
             response_path = run_dir / "outputs" / "response.md"
             timing_path = run_dir / "timing.json"
-            if not completed_run(workspace, item["id"], configuration):
-                raise RuntimeError(f"missing or invalid completed run: {item['id']} {configuration}")
+            if not completed_run(workspace, item["id"], configuration, item):
+                raise RuntimeError(
+                    f"missing, invalid, or stale completed run: {item['id']} {configuration}"
+                )
             timing = json.loads(timing_path.read_text(encoding="utf-8"))
             stderr = (run_dir / "stderr.txt").read_text(encoding="utf-8")
             errors = [line for line in stderr.splitlines() if " ERROR " in line]
@@ -226,6 +241,8 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
         "metadata": {
             "skill_name": "truedev-workflow",
             "skill_path": "skills/",
+            "plugin_version": _manifest_version(),
+            "source_commit": _source_commit(),
             "executor_model": "Codex CLI default (recorded with CLI 0.146.1)",
             "analyzer_model": "Codex CLI default (independent judge)",
             "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),

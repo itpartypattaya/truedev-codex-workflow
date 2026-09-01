@@ -15,7 +15,9 @@
       "negative-ambiguous-gate-continuation",
       "negative-unauthorized-git-release"
     ],
-    "runs_per_configuration": 1
+    "runs_per_configuration": 1,
+    "plugin_version": "1.0.0",
+    "source_commit": "c9fd28b"
   },
   "runs": [
     {

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -121,6 +122,29 @@ def extract_total_tokens(events: str) -> int:
     return maximum
 
 
+def input_fingerprint(item: dict[str, Any], configuration: str) -> str:
+    """Identify everything a run depends on, so --resume cannot keep a stale answer.
+
+    Presence of an output said nothing about whether the prompt, the assertions, the
+    skill text, or the runner had changed since it was produced.
+    """
+    digest = hashlib.sha256()
+    digest.update(json.dumps(item, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    digest.update(configuration.encode("utf-8"))
+    digest.update(make_prompt(item, configuration).encode("utf-8"))
+    sources = [ROOT / "scripts" / "truedev_workflow.py"]
+    for skill in sorted((ROOT / "skills").iterdir()):
+        if skill.is_dir():
+            sources.extend(sorted(skill.rglob("*.md")))
+    for source in sources:
+        try:
+            digest.update(source.read_bytes())
+        except OSError:
+            digest.update(b"<unreadable>")
+        digest.update(source.name.encode("utf-8"))
+    return digest.hexdigest()
+
+
 def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: Path) -> None:
     eval_dir = workspace / item["id"]
     run_dir = eval_dir / configuration
@@ -181,6 +205,7 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
         "exit_code": result.returncode,
         "output_valid": output_valid,
         "completed": completed,
+        "input_fingerprint": input_fingerprint(item, configuration),
     }
     (run_dir / "timing.json").write_text(
         json.dumps(timing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -190,7 +215,9 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
     print(f"PASS executor {item['id']} {configuration}: {duration:.1f}s, {timing['total_tokens']} tokens", flush=True)
 
 
-def completed_run(workspace: Path, eval_id: str, configuration: str) -> bool:
+def completed_run(
+    workspace: Path, eval_id: str, configuration: str, item: dict[str, Any] | None = None
+) -> bool:
     run_dir = workspace / eval_id / configuration
     output = run_dir / "outputs" / "response.md"
     timing_path = run_dir / "timing.json"
@@ -200,7 +227,15 @@ def completed_run(workspace: Path, eval_id: str, configuration: str) -> bool:
         timing = json.loads(timing_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    return timing.get("exit_code") == 0 and timing.get("output_valid") is True and timing.get("completed") is True
+    if not (
+        timing.get("exit_code") == 0
+        and timing.get("output_valid") is True
+        and timing.get("completed") is True
+    ):
+        return False
+    if item is None:
+        return True
+    return timing.get("input_fingerprint") == input_fingerprint(item, configuration)
 
 
 def select_evals(items: list[dict[str, Any]], eval_id: str | None, limit: int | None) -> list[dict[str, Any]]:
@@ -230,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for item in items:
             for configuration in configurations:
-                if args.resume and completed_run(workspace, item["id"], configuration):
+                if args.resume and completed_run(workspace, item["id"], configuration, item):
                     print(f"SKIP existing {item['id']} {configuration}", flush=True)
                     continue
                 run_one(item, configuration, fixture, workspace)

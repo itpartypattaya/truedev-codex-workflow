@@ -107,7 +107,14 @@ memory unless the user explicitly asks. Finish DOCUMENT after docs and implement
 2. Show the exact intended commit paths and any proposed push/PR/merge action.
 3. Do not stage all files. Do not push, create or merge a PR, delete a branch, or clean a worktree
    without authority for that action.
-4. Open CLOSE and wait for explicit approval.
-5. After the approved close actions, approve CLOSE, change only this slice's header from
-   `Status: pending` to `Status: completed`, and archive the lifecycle receipt. Individual task
-   checkboxes may be updated earlier, but the slice header changes only after CLOSE.
+4. Open CLOSE and wait for explicit approval. While the gate is open every repository change is
+   blocked, including `git add`, `git commit`, and `git push`, so no close action can run yet.
+5. Once the user approves, record it first with `approve --step CLOSE --user-confirmed`. That
+   transition completes the lifecycle and unblocks the tools, and it is the only order in which the
+   authorized close actions can actually run.
+6. Then perform exactly the actions the user authorized, change only this slice's header from
+   `Status: pending` to `Status: completed`, and run `lifecycle archive`. Individual task checkboxes
+   may be updated earlier, but the slice header changes only after CLOSE.
+7. Approval covers the actions named at the gate and nothing else. If something new comes up after
+   the transition, stop and ask again rather than treating the completed lifecycle as open
+   authority.

@@ -68,15 +68,20 @@ VALID_STATUSES = frozenset({"pending", "in_progress", "awaiting_approval", "comp
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 HEX_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
-SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
+# A bare `&` chains commands in Command Prompt, so it belongs with the other
+# separators; `&&` is covered by it.
+SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
+# Values the allowlist passes through verbatim. Kept free of shell metacharacters so
+# an argument cannot smuggle a second command past the whole-command match above.
+_VALUE = r"(?:\"[^\"&|;<>`$]+\"|'[^'&|;<>`$]+'|[^\s\"'&|;<>`$]+)"
 SAFE_RUNNER_COMMAND = re.compile(
     r"^\s*(?:python(?:3(?:\.\d+)?)?|py(?:\s+-3(?:\.\d+)?)?)\s+"
     r"(?P<runner>\"[^\"]*truedev_workflow\.py\"|'[^']*truedev_workflow\.py'|\S*truedev_workflow\.py)\s+"
     r"(?:(?:lifecycle|project-init)\s+(?:status|validate)|"
-    r"project-init\s+validate-slices(?:\s+--plan-dir\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+))?|"
-    r"git-preflight(?:\s+(?:--require-clean|--expected-branch\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+)))*|"
+    r"project-init\s+validate-slices(?:\s+--plan-dir\s+" + _VALUE + r")?|"
+    r"git-preflight(?:\s+(?:--require-clean|--expected-branch\s+" + _VALUE + r"))*|"
     r"inspect\s+(?:git-status|git-diff(?:\s+(?:--staged|--stat|--check|--name-only|--name-status))*|"
-    r"file\s+--path\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+))|"
+    r"file\s+--path\s+" + _VALUE + r")|"
     r"(?:lifecycle|project-init)\s+abandon\s+--user-confirmed|"
     r"lifecycle\s+recover\s+--accept-current-branch\s+--user-confirmed|"
     r"lifecycle\s+release-compact\s+--user-confirmed|"
@@ -303,12 +308,13 @@ def require_contained_state(root: Path, target: Path) -> Path:
     expected = base
     for part in relative.parts:
         expected = expected / part
-        if not expected.exists():
-            break
+        # A broken link does not exist, so the link test has to come first.
         if _is_link(expected):
             raise WorkflowError(
                 f"workflow state path must not contain links or junctions: {expected}"
             )
+        if not expected.exists():
+            break
         try:
             resolved = expected.resolve(strict=True)
         except OSError as exc:
@@ -371,9 +377,13 @@ def workflow_lock(root: Path, workflow: str):
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
+    # Order matters: a broken link does not exist, so checking existence first made
+    # tampering look like absence and let the caller conclude no workflow was active.
+    if _is_link(path):
+        raise WorkflowError(f"invalid workflow state {path}: expected a regular file")
     if not path.exists():
         return None
-    if _is_link(path) or not path.is_file():
+    if not path.is_file():
         raise WorkflowError(f"invalid workflow state {path}: expected a regular file")
     try:
         raw = path.read_bytes()
@@ -797,11 +807,17 @@ def require_state_ignored(root: Path, workflow: str) -> None:
     tracked = _run_git(root, "ls-files", "--error-unmatch", relative)
     if tracked.returncode == 0:
         raise WorkflowError(f"workflow state is already tracked by Git: {relative}")
-    ignored = _run_git(root, "check-ignore", "--quiet", "--no-index", relative)
-    if ignored.returncode != 0:
-        raise WorkflowError(
-            f"workflow state is not ignored by Git: add {STATE_DIR}/ to .gitignore before starting"
-        )
+    # Checking only the active file let a rule such as `.truedev-workflow/lifecycle.json`
+    # pass while archived receipts under history/ stayed committable. Require a rule that
+    # covers the directory, using a probe name that no workflow ever writes.
+    probe = (Path(STATE_DIR) / "history" / "ignore-probe.state").as_posix()
+    for candidate in (relative, probe):
+        ignored = _run_git(root, "check-ignore", "--quiet", "--no-index", candidate)
+        if ignored.returncode != 0:
+            raise WorkflowError(
+                f"workflow state is not ignored by Git: add {STATE_DIR}/ to .gitignore "
+                f"before starting (uncovered path: {candidate})"
+            )
 
 
 @_lock_workflow("lifecycle")
@@ -1178,7 +1194,7 @@ def archive_workflow(workflow: str) -> int:
         raise WorkflowError(f"cannot archive {workflow} before {order[-1]} is completed")
     if not state.get("finished_at"):
         raise WorkflowError(f"cannot archive {workflow} without finished_at")
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     destination = require_contained_state(
         root, root / STATE_DIR / "history" / f"{stamp}-{workflow}.json"
     )
@@ -1393,7 +1409,7 @@ def _has_workflow_state(root: Path | None) -> bool:
     if root is None:
         return False
     return any(
-        path.exists() or path.is_symlink()
+        _state_is_present(path)
         for path in (state_path(root, "project-init"), state_path(root, "lifecycle"))
     )
 
@@ -1468,11 +1484,21 @@ def _is_safe_gate_command(payload: Mapping[str, Any]) -> bool:
         return False
 
 
+def _state_is_present(path: Path) -> bool:
+    """A broken link is tampering, not absence.
+
+    `Path.exists()` follows the link and reports False, which used to make an
+    active workflow look absent and let mutations through. Presence must be
+    decided on the entry itself so the read below fails closed instead.
+    """
+    return path.exists() or path.is_symlink() or _is_reparse_point(path)
+
+
 def _active_states(root: Path) -> list[tuple[str, dict[str, Any]]]:
     active: list[tuple[str, dict[str, Any]]] = []
     for workflow in ("project-init", "lifecycle"):
         path = state_path(root, workflow)
-        if path.exists():
+        if _state_is_present(path):
             state = load_state(root, workflow)
             if state is not None:
                 if workflow == "lifecycle":
@@ -1603,8 +1629,13 @@ def hook_pre_tool() -> int:
     for other in related_roots(root):
         try:
             other_states = _active_states(other)
-        except BranchMismatchError:
-            continue
+        except BranchMismatchError as exc:
+            # Skipping here let a gate in a sibling worktree be bypassed by moving the
+            # gated checkout to another branch. Fail closed, exactly as we do locally.
+            return _deny(
+                f"TrueDev lifecycle in the related checkout {other} is bound to another "
+                f"branch; switch back or recover it before mutating: {exc}"
+            )
         except WorkflowError as exc:
             return _deny(
                 f"TrueDev state in a related checkout is invalid; repair or recover it: {exc}"

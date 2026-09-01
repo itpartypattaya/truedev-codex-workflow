@@ -4,6 +4,35 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.9] — 2026-09-01
+
+### Security
+- A single `&` no longer passes the gate allowlist. Command Prompt chains on it, so
+  `git-preflight --expected-branch main&whoami` was accepted as a read-only command and ran the
+  second half. Argument values are also confined to characters that carry no shell meaning.
+- A state file replaced by a broken link is treated as tampering rather than absence. Existence was
+  tested before link-ness in three places, so following the dangling link reported no active
+  workflow and mutations were allowed.
+- A branch mismatch in a related checkout now denies instead of being skipped. Opening a gate, then
+  moving the gated checkout to another branch, let a sibling worktree mutate freely.
+- Starting a workflow requires an ignore rule covering the whole state directory. A rule naming only
+  the active file left archived receipts, which carry task and approval metadata, committable.
+
+### Fixed
+- Archive receipts include microseconds, so two archives in the same second no longer collide.
+- `--resume` and grading reject an eval run whose prompt, assertions, skill text, or runner changed
+  since it was produced; runs now record a fingerprint of everything they depend on.
+
+### Documentation
+- The CLOSE step described an impossible order: it asked for the close actions before recording the
+  approval, while the open gate blocks exactly those actions. Approval is recorded first, which is
+  what unblocks the tools, and the authorized actions follow.
+- `project-init` states that Git is required. `start` resolves the repository root through Git and
+  refuses unless the state directory is ignored, so it was never optional.
+- The published benchmark records the version and commit that produced it, and is marked as
+  describing 1.0.0. `validate_release.py --require-current-evidence` fails until the suite is rerun
+  from the release SHA; the submission checklist now uses that flag.
+
 ## [1.1.8] — 2026-09-01
 
 ### Fixed

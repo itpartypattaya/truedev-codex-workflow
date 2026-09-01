@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import re
@@ -179,6 +180,24 @@ def validate_evals() -> None:
         require(isinstance(assertions, list) and len(assertions) >= 3, f"eval {item.get('id')} needs objective assertions")
 
 
+def validate_evidence_is_current(manifest: dict[str, Any]) -> None:
+    """Refuse to present benchmark results that describe a different release.
+
+    The published results carry no provenance until 1.1.8, so a run from an older
+    tree looked exactly like a fresh one.
+    """
+    benchmark = load_json(ROOT / "evals" / "results" / "benchmark.json")
+    metadata = benchmark.get("metadata")
+    require(isinstance(metadata, dict), "benchmark.json must carry a metadata object")
+    assert isinstance(metadata, dict)
+    recorded = metadata.get("plugin_version")
+    require(
+        isinstance(recorded, str) and recorded == manifest["version"],
+        f"benchmark evidence was produced for {recorded!r} but this release is "
+        f"{manifest['version']!r}; rerun the eval suite from the release SHA",
+    )
+
+
 def validate_no_legacy_host_text() -> None:
     needle = "cl" + "aude"
     company_needle = "anth" + "ropic"
@@ -194,7 +213,7 @@ def validate_no_legacy_host_text() -> None:
         require(needle not in text and company_needle not in text, f"legacy host reference remains in {path.relative_to(ROOT)}")
 
 
-def validate(root: Path = ROOT) -> dict[str, Any]:
+def validate(root: Path = ROOT, *, require_current_evidence: bool = False) -> dict[str, Any]:
     require(root.resolve() == ROOT.resolve(), "alternate roots are not supported")
     manifest = validate_manifest()
     validate_hooks()
@@ -202,12 +221,21 @@ def validate(root: Path = ROOT) -> dict[str, Any]:
     validate_public_materials()
     validate_evals()
     validate_no_legacy_host_text()
+    if require_current_evidence:
+        validate_evidence_is_current(manifest)
     return manifest
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--require-current-evidence",
+        action="store_true",
+        help="also require the published benchmark to describe this exact release",
+    )
+    args = parser.parse_args()
     try:
-        manifest = validate()
+        manifest = validate(require_current_evidence=args.require_current_evidence)
     except ReleaseValidationError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
