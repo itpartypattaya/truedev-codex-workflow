@@ -4,6 +4,24 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.8] — 2026-09-01
+
+### Fixed
+- An open gate inside a submodule now also stops work done from the parent checkout. Enclosing
+  checkouts were already covered; the reverse direction was not, so the guard was asymmetric.
+  Declared submodule paths are read from `.gitmodules` without spawning Git, and paths that are
+  absolute or escape the repository are ignored.
+- `inspect git-diff` refuses with an explanation when excluding the sensitive paths would exceed the
+  command-line limit, instead of failing with an opaque operating-system error.
+- Gate denials for the compact gate now name `lifecycle release-compact --user-confirmed`, so a host
+  that never emits a compact event does not look like a dead end.
+- Archiving and abandoning tolerate a state file removed underneath them.
+
+### Documentation
+- `SECURITY.md` states which tool names the `PreToolUse` matcher enumerates, that a tool introduced
+  later would not be gated, and what widening the matcher to `.*` costs — roughly half a second per
+  tool call on Windows.
+
 ## [1.1.7] — 2026-09-01
 
 ### Fixed
