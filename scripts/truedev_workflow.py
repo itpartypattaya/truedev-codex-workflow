@@ -60,7 +60,10 @@ PROJECT_PHASES = (
 PROJECT_USER_GATES = frozenset(PROJECT_PHASES[:-1])
 
 VALID_STATUSES = frozenset({"pending", "in_progress", "awaiting_approval", "completed"})
-CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Line breaks are rejected with the other control characters: stored text is echoed
+# into single-line status output that the model is told to trust.
+CONTROL_CHARS = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+HEX_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
 SAFE_RUNNER_COMMAND = re.compile(
@@ -167,8 +170,20 @@ def _has_valid_git_head(git_dir: Path) -> bool:
     )
 
 
+def _is_reparse_point(path: Path) -> bool:
+    """A Windows junction redirects the path without being a symlink to Python."""
+    try:
+        return bool(getattr(os.lstat(path), "st_reparse_tag", 0))
+    except OSError:
+        return False
+
+
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or _is_reparse_point(path)
+
+
 def _has_valid_git_dir(git_dir: Path) -> bool:
-    if not git_dir.is_dir() or git_dir.is_symlink() or not _has_valid_git_head(git_dir):
+    if not git_dir.is_dir() or _is_link(git_dir) or not _has_valid_git_head(git_dir):
         return False
     common_dir = git_dir
     commondir = _read_first_line(git_dir / "commondir")
@@ -182,7 +197,7 @@ def _has_valid_git_dir(git_dir: Path) -> bool:
             return False
     return (
         common_dir.is_dir()
-        and not common_dir.is_symlink()
+        and not _is_link(common_dir)
         and (common_dir / "config").is_file()
         and (common_dir / "objects").is_dir()
         and (common_dir / "refs").is_dir()
@@ -191,9 +206,11 @@ def _has_valid_git_dir(git_dir: Path) -> bool:
 
 def _has_valid_git_marker(root: Path) -> bool:
     marker = root / ".git"
-    if marker.is_dir() and not marker.is_symlink():
+    if _is_link(marker):
+        return False
+    if marker.is_dir():
         return _has_valid_git_dir(marker)
-    if not marker.is_file() or marker.is_symlink():
+    if not marker.is_file():
         return False
     first_line = _read_first_line(marker)
     if first_line is None:
@@ -223,7 +240,7 @@ def find_repo_root(start: Path | str) -> Path | None:
         return Path(result.stdout.strip()).resolve()
     for candidate in candidates:
         state_dir = candidate / STATE_DIR
-        if state_dir.is_dir() and not state_dir.is_symlink():
+        if state_dir.is_dir() and not _is_link(state_dir):
             return candidate
     return None
 
@@ -231,6 +248,38 @@ def find_repo_root(start: Path | str) -> Path | None:
 def state_path(root: Path, workflow: str) -> Path:
     filename = LIFECYCLE_FILE if workflow == "lifecycle" else PROJECT_INIT_FILE
     return root / STATE_DIR / filename
+
+
+def require_contained_state(root: Path, target: Path) -> Path:
+    """Refuse a state path that a link or junction redirects outside the repository.
+
+    Only the state file itself was checked before, so a linked `.truedev-workflow`
+    directory silently moved every read and write outside the repository.
+    """
+    base = root.resolve()
+    try:
+        relative = target.relative_to(root)
+    except ValueError as exc:
+        raise WorkflowError(f"workflow state path escapes the repository: {target}") from exc
+    expected = base
+    for part in relative.parts:
+        expected = expected / part
+        if not expected.exists():
+            break
+        if _is_link(expected):
+            raise WorkflowError(
+                f"workflow state path must not contain links or junctions: {expected}"
+            )
+        try:
+            resolved = expected.resolve(strict=True)
+        except OSError as exc:
+            raise WorkflowError(f"cannot resolve workflow state path {expected}: {exc}") from exc
+        if resolved != expected:
+            raise WorkflowError(
+                f"workflow state path must stay inside the repository: "
+                f"{expected} resolves to {resolved}"
+            )
+    return target
 
 
 @contextmanager
@@ -285,7 +334,7 @@ def workflow_lock(root: Path, workflow: str):
 def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    if path.is_symlink() or not path.is_file():
+    if _is_link(path) or not path.is_file():
         raise WorkflowError(f"invalid workflow state {path}: expected a regular file")
     try:
         raw = path.read_bytes()
@@ -382,6 +431,11 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
         slice_ref = state.get("slice")
         if slice_ref is not None:
             _validate_slice_ref(slice_ref)
+        recorded_head = state.get("head_sha")
+        if recorded_head is not None and (
+            not isinstance(recorded_head, str) or HEX_SHA.fullmatch(recorded_head) is None
+        ):
+            raise WorkflowError("head_sha must be a hexadecimal commit id")
         _validate_text(state.get("base_branch"), "base_branch", maximum=255)
         _validate_text(state.get("branch"), "branch", maximum=255)
         if not isinstance(state.get("awaiting_compact"), bool):
@@ -489,7 +543,7 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
 
 
 def load_state(root: Path, workflow: str) -> dict[str, Any] | None:
-    value = _read_json(state_path(root, workflow))
+    value = _read_json(require_contained_state(root, state_path(root, workflow)))
     if value is not None:
         validate_state(value, workflow)
         recorded_root = Path(value["repo_root"]).resolve()
@@ -503,7 +557,7 @@ def load_state(root: Path, workflow: str) -> dict[str, Any] | None:
 def save_state(root: Path, workflow: str, state: dict[str, Any]) -> None:
     state["updated_at"] = utc_now()
     validate_state(state, workflow)
-    _atomic_write(state_path(root, workflow), state)
+    _atomic_write(require_contained_state(root, state_path(root, workflow)), state)
 
 
 def _new_steps(order: Sequence[str], user_gates: Iterable[str]) -> dict[str, dict[str, Any]]:
@@ -549,6 +603,19 @@ def _validate_slice_ref(value: Any) -> str:
             "slice must be a repository-relative <plan-dir>/slice-*.md path with safe path components"
         )
     return path.as_posix()
+
+
+def _one_line(value: Any) -> str:
+    """Keep one status field on one line, even for state written by an older version."""
+    return CONTROL_CHARS.sub(" ", str(value))
+
+
+def head_sha(root: Path) -> str | None:
+    result = _run_git(root, "rev-parse", "--verify", "HEAD")
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value if HEX_SHA.fullmatch(value) else None
 
 
 def current_branch(root: Path) -> str:
@@ -653,10 +720,10 @@ def is_sensitive_path(path: str) -> bool:
     parts = [part for part in normalized.split("/") if part]
     if not parts:
         return False
-    basename = parts[-1]
+    basename = parts[-1].rstrip(" .") or parts[-1]
     if basename in {".env.example", ".env.sample", ".env.template"}:
         return False
-    if basename == ".env" or basename.startswith(".env."):
+    if basename == ".env" or basename.startswith(".env.") or basename.endswith(".env"):
         return True
     if STATE_DIR in parts:
         return True
@@ -720,6 +787,7 @@ def lifecycle_start(args: argparse.Namespace) -> int:
         "slice": slice_ref,
         "base_branch": args.base or detect_default_branch(root),
         "branch": branch,
+        "head_sha": head_sha(root),
         "started_at": now,
         "updated_at": now,
         "current_step": LIFECYCLE_STEPS[0],
@@ -847,16 +915,18 @@ def lifecycle_skip_components(args: argparse.Namespace) -> int:
 
 
 def _archive_raw_state(root: Path, workflow: str, label: str) -> Path:
-    source = state_path(root, workflow)
+    source = require_contained_state(root, state_path(root, workflow))
     if not source.exists():
         raise WorkflowError(f"no active {workflow} workflow")
-    if source.is_symlink() or not source.is_file():
+    if _is_link(source) or not source.is_file():
         raise WorkflowError(f"refusing to archive non-regular workflow state: {source}")
     raw = source.read_bytes()
     if len(raw) > MAX_STATE_BYTES:
         raise WorkflowError(f"workflow state exceeds {MAX_STATE_BYTES} bytes")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    destination = root / STATE_DIR / "history" / f"{stamp}-{workflow}-{label}.state"
+    destination = require_contained_state(
+        root, root / STATE_DIR / "history" / f"{stamp}-{workflow}-{label}.state"
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
     try:
@@ -1013,21 +1083,30 @@ def print_status(workflow: str) -> int:
     order, _, current_key = _definition(workflow)
     print(f"{workflow}: {state[current_key]}")
     if workflow == "lifecycle":
-        print(f"task: {state['task']}")
+        print(f"task: {_one_line(state['task'])}")
         if state.get("slice") is not None:
-            print(f"slice: {state['slice']}")
+            print(f"slice: {_one_line(state['slice'])}")
         active_branch = current_branch(root)
         if active_branch == state["branch"]:
-            print(f"branch: {state['branch']} (base: {state['base_branch']})")
+            print(f"branch: {_one_line(state['branch'])} (base: {_one_line(state['base_branch'])})")
         else:
             print(
-                f"branch: {state['branch']} (active: {active_branch}; MISMATCH; "
-                f"base: {state['base_branch']})"
+                f"branch: {_one_line(state['branch'])} (active: {_one_line(active_branch)}; "
+                f"MISMATCH; base: {_one_line(state['base_branch'])})"
             )
+        recorded_head = state.get("head_sha")
+        if recorded_head:
+            active_head = head_sha(root)
+            if active_head is None:
+                print(f"head: {recorded_head} (active: unknown)")
+            elif active_head != recorded_head:
+                print(f"head: {recorded_head} (active: {active_head}; MOVED)")
+            else:
+                print(f"head: {recorded_head}")
         print(f"awaiting_compact: {str(state['awaiting_compact']).lower()}")
     else:
-        print(f"project: {state['project']}")
-        print(f"spec: {state['spec']}")
+        print(f"project: {_one_line(state['project'])}")
+        print(f"spec: {_one_line(state['spec'])}")
     for name in order:
         item = state["steps"][name]
         marker = ">" if name == state[current_key] else " "
@@ -1061,7 +1140,9 @@ def archive_workflow(workflow: str) -> int:
     if not state.get("finished_at"):
         raise WorkflowError(f"cannot archive {workflow} without finished_at")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    destination = root / STATE_DIR / "history" / f"{stamp}-{workflow}.json"
+    destination = require_contained_state(
+        root, root / STATE_DIR / "history" / f"{stamp}-{workflow}.json"
+    )
     if destination.exists():
         raise WorkflowError(f"archive destination already exists: {destination}")
     _atomic_write(destination, state)
@@ -1288,6 +1369,10 @@ def _hook_context(event: str) -> tuple[dict[str, Any] | None, Path | None]:
     root = find_repo_root(cwd if isinstance(cwd, str) and cwd.strip() else Path.cwd())
     if not _has_workflow_state(root):
         return payload, root
+    if event == "stop" and payload.get("stop_hook_active") is True:
+        # The turn was already continued once by this hook. Re-validating a payload
+        # the host keeps sending would block the turn forever.
+        return payload, root
     _validate_hook_payload(payload, event)
     return payload, root
 
@@ -1336,7 +1421,8 @@ def _is_safe_gate_command(payload: Mapping[str, Any]) -> bool:
             return False
     try:
         return candidate.resolve() == Path(__file__).resolve()
-    except OSError:
+    except (OSError, ValueError):
+        # A NUL byte in the path raises ValueError, not OSError.
         return False
 
 
@@ -1353,6 +1439,68 @@ def _active_states(root: Path) -> list[tuple[str, dict[str, Any]]]:
     return active
 
 
+def related_roots(root: Path) -> list[Path]:
+    """Other checkouts whose open gate must also cover work done from this root.
+
+    A linked worktree is the same repository, and a nested checkout such as a
+    submodule sits inside its parent's working tree. Both used to be invisible
+    here, so a gate opened in one of them did not stop mutations in the others.
+    """
+    roots: list[Path] = []
+    seen = {root.resolve()}
+    # Enclosing checkouts are a pure filesystem walk, so an ordinary single checkout
+    # pays nothing extra here.
+    for parent in root.resolve().parents:
+        if parent in seen:
+            continue
+        if any(
+            (parent / STATE_DIR / name).exists()
+            for name in (LIFECYCLE_FILE, PROJECT_INIT_FILE)
+        ):
+            seen.add(parent)
+            roots.append(parent)
+    if not _may_have_linked_worktrees(root):
+        return roots
+    listing = _run_git(root, "worktree", "list", "--porcelain")
+    if listing.returncode == 0:
+        for line in listing.stdout.splitlines():
+            if not line.startswith("worktree "):
+                continue
+            try:
+                candidate = Path(line[len("worktree ") :].strip()).resolve()
+            except OSError:
+                continue
+            if candidate not in seen and candidate.is_dir():
+                seen.add(candidate)
+                roots.append(candidate)
+    return roots
+
+
+def _may_have_linked_worktrees(root: Path) -> bool:
+    """Avoid spawning Git for the common case of a single ordinary checkout."""
+    marker = root / ".git"
+    if marker.is_file():
+        return True  # this checkout is itself linked: a worktree or a submodule
+    return (marker / "worktrees").is_dir()
+
+
+def _gate_decision(states: Sequence[tuple[str, Mapping[str, Any]]], scope: str) -> str | None:
+    for workflow, state in states:
+        _, _, current_key = _definition(workflow)
+        current = state[current_key]
+        if workflow == "lifecycle" and state.get("awaiting_compact"):
+            return (
+                f"TrueDev compact gate is active before {current}{scope}. "
+                "Compact the Codex task, then retry."
+            )
+        if state["steps"][current]["status"] == "awaiting_approval":
+            return (
+                f"TrueDev user gate {workflow}:{current} is awaiting explicit approval{scope}; "
+                "mutations are blocked."
+            )
+    return None
+
+
 def hook_pre_tool() -> int:
     payload, root = _hook_context("pre-tool")
     if payload is None or root is None:
@@ -1365,19 +1513,21 @@ def hook_pre_tool() -> int:
         return _deny(f"TrueDev lifecycle branch mismatch; switch back or recover before mutating: {exc}")
     except WorkflowError as exc:
         return _deny(f"TrueDev state is invalid; repair or recover it before mutating the repo: {exc}")
-    if not states:
-        return 0
-    for workflow, state in states:
-        _, _, current_key = _definition(workflow)
-        current = state[current_key]
-        if workflow == "lifecycle" and state.get("awaiting_compact"):
+    reason = _gate_decision(states, "")
+    if reason is not None:
+        return _deny(reason)
+    for other in related_roots(root):
+        try:
+            other_states = _active_states(other)
+        except BranchMismatchError:
+            continue
+        except WorkflowError as exc:
             return _deny(
-                f"TrueDev compact gate is active before {current}. Compact the Codex task, then retry."
+                f"TrueDev state in a related checkout is invalid; repair or recover it: {exc}"
             )
-        if state["steps"][current]["status"] == "awaiting_approval":
-            return _deny(
-                f"TrueDev user gate {workflow}:{current} is awaiting explicit approval; mutations are blocked."
-            )
+        reason = _gate_decision(other_states, f" in the related checkout {other}")
+        if reason is not None:
+            return _deny(reason)
     return 0
 
 
@@ -1580,7 +1730,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def use_utf8_output() -> None:
+    """Emit UTF-8 regardless of the console code page.
+
+    Output carries repository-controlled text: branch names, task text, and file
+    names. On a Windows ANSI code page any character outside it turned every
+    status, preflight, and hook emission into an unhandled UnicodeEncodeError.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    use_utf8_output()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

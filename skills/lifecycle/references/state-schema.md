@@ -22,6 +22,11 @@ an OS advisory lock and validates these invariants before every atomic replace:
 - `awaiting_compact` is boolean and is cleared by a validated compact-session hook or an explicit
   `release-compact --user-confirmed` receipt when the host event is unavailable.
 - History contains transition metadata, not free-form prompts or repository content.
+- Stored text contains no line breaks, so a status field cannot fabricate another one.
+- `head_sha` records the commit the workflow started from. It never blocks a transition; `status`
+  marks it `MOVED` when the branch name still matches but the commit no longer does.
+- The state directory must be a real directory inside the repository; a symlink or junction in
+  that path fails closed.
 
 Hooks first recognize validated `.git` directory/worktree markers, then ask Git only for unusual
 layouts before considering a standalone state root. This avoids a Git subprocess on every normal
