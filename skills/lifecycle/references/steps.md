@@ -76,7 +76,10 @@ Open the COMPONENTS gate and stop.
 
 ## REVIEW — user gate
 
-1. Inspect the complete task diff before staging anything.
+1. Inspect the complete task diff before staging anything. When `inspect git-diff` prints
+   `# TrueDev omitted N sensitive path(s)`, the diff you just read is short by exactly those files.
+   Name them in the review, state that their contents were not shown, and treat each one as an
+   unreviewed change rather than an absent one.
 2. Scan for secrets, transient state, generated noise, and unrelated files.
 3. Review correctness, authorization, data integrity, concurrency, error handling, observability,
    performance, compatibility, and test gaps.

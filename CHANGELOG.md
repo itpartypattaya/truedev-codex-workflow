@@ -4,6 +4,19 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.7] — 2026-09-01
+
+### Fixed
+- Accepted the bare `py` launcher and `py -3.11` in gate-exempt commands. Only `py -3` was allowed,
+  so the standard Windows launcher spelling was refused as if it were an unsafe command.
+- Streamed `git ls-files` in `git-preflight` instead of buffering the whole index listing, so peak
+  memory no longer grows with repository size, and decoded paths with `surrogateescape` so a name
+  that is not valid UTF-8 stays testable rather than losing the bytes that identify it.
+
+### Documentation
+- `steps.md` now tells the REVIEW step to name the paths `inspect git-diff` withheld and treat each
+  one as an unreviewed change rather than an absent one.
+
 ## [1.1.6] — 2026-09-01
 
 ### Security
