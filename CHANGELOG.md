@@ -4,6 +4,29 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.6] — 2026-09-01
+
+### Security
+- Refused a `.truedev-workflow` directory that a symlink or Windows junction redirects, which
+  previously moved every state read and write outside the repository.
+- Detected Windows junctions wherever symlinks were already rejected, so a junction can no longer
+  present an arbitrary directory as a repository root.
+- Extended an open gate to linked worktrees and enclosing checkouts such as submodules; work done
+  from those directories used to bypass the gate entirely.
+- Rejected line breaks in stored workflow text, and rendered every status field on a single line, so
+  task or specification text can no longer forge status lines the model is told to trust.
+
+### Fixed
+- Emitted UTF-8 regardless of the console code page. Any character outside a Windows ANSI code page
+  previously turned `status`, `git-preflight`, `validate-slices`, and hook output into an unhandled
+  `UnicodeEncodeError`, losing the hook's denial reason.
+- Recorded the starting commit and reported it in `status`, so a history rewrite under an unchanged
+  branch name is visible instead of silent.
+- Stopped the Stop hook from blocking a turn forever when the host repeats a payload it cannot
+  validate.
+- Treated `*.env` names and trailing-dot or trailing-space variants as credential paths, and returned
+  a clean refusal instead of a `ValueError` for a NUL byte in a runner path.
+
 ## [1.1.5] — 2026-09-01
 
 ### Security

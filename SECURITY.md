@@ -38,7 +38,15 @@ change.
 - A gate-exempt command that names the runner by a relative path is judged against the working
   directory of that tool call, which is the directory the command shell will use.
 - Branch placeholders such as `(detached)` and `(git-unavailable)` identify no commit. They are
-  never recorded by recovery and never satisfy the branch guard.
+  never recorded by recovery and never satisfy the branch guard. The starting commit is recorded
+  and a later history rewrite under the same branch name is reported by `status`.
+- The state directory must be a real directory inside the repository. A symlink or Windows
+  junction in that path is refused for both reads and writes, and junctions are rejected wherever
+  symlinks are.
+- An open gate also covers linked worktrees and enclosing checkouts such as submodules.
+- Stored workflow text may not contain line breaks, and status fields are rendered on one line, so
+  repository-controlled text cannot forge the status the model reads.
+- Output is written as UTF-8 regardless of the console code page.
 - The runner does not pull, stage all, push, merge, reset, delete branches, or remove worktrees.
 - The plugin has no network client, telemetry, credential store, or MCP server.
 

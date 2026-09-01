@@ -73,6 +73,9 @@ specification
   → TEST → VERIFY → REVIEW → DOCUMENT → CLOSE
 ```
 
+An open gate also covers linked worktrees and enclosing checkouts such as submodules, so work done
+from a sibling directory cannot slip past it.
+
 Active state is stored below `.truedev-workflow/` at the repository root and is Git-ignored. The
 runner serializes concurrent transitions, writes state atomically, rejects invalid transitions, and archives completed receipts below
 `.truedev-workflow/history/`.
