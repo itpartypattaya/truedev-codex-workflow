@@ -4,6 +4,23 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.4] — 2026-09-01
+
+### Fixed
+- Made Windows hook launch commands independent of Command Prompt or PowerShell variable syntax and
+  fail-open when the installed plugin root is unavailable.
+- Preserved status, explicit recovery, and abandonment when Git metadata disappears; detached HEAD
+  remains readable but can no longer be recorded as a recovered branch.
+- Restored no-state hook inertness before tool-specific payload validation.
+- Narrowed credential-path blocking to high-confidence files and excluded those files from the
+  bundled Git diff inspector without blocking ordinary source names such as `secrets.ts`.
+- Accepted repository-relative slice files from a custom plan directory and avoided a Git subprocess
+  during normal repository-root discovery.
+- Rejected incomplete nested Git markers and free-form slice-directory components before using them
+  for hook root selection or compact-session context.
+- Passed filtered Git diff filenames back as literal pathspecs so pathspec magic cannot reselect a
+  sensitive file.
+
 ## [1.1.3] — 2026-09-01
 
 ### Security
@@ -17,6 +34,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - Pinned CI actions and the Ruff dependency by immutable hashes.
 - Added skill-local icon assets so Codex can load interface metadata without path warnings.
 - Keep advisory lock files inside Git metadata so a rejected start cannot dirty the working tree.
+
+## [1.1.2] — 2026-09-01
+
+### Changed
+- Reserved during local release preparation; its candidate changes were superseded by `1.1.3`
+  before publication.
 
 ## [1.1.1] — 2026-09-01
 

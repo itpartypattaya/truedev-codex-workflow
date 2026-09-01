@@ -14,7 +14,7 @@ import datetime as dt
 from functools import wraps
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -29,6 +29,7 @@ MAX_HOOK_BYTES = 1024 * 1024
 MAX_INSPECT_FILE_BYTES = 1024 * 1024
 LOCK_TIMEOUT_SECONDS = 5.0
 DETACHED_HEAD = "(detached)"
+GIT_UNAVAILABLE = "(git-unavailable)"
 STATE_DIR = ".truedev-workflow"
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -59,6 +60,7 @@ PROJECT_USER_GATES = frozenset(PROJECT_PHASES[:-1])
 
 VALID_STATUSES = frozenset({"pending", "in_progress", "awaiting_approval", "completed"})
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
 SAFE_RUNNER_COMMAND = re.compile(
     r"^\s*(?:(?:python(?:3(?:\.\d+)?)?)|(?:py\s+-3))\s+"
@@ -90,15 +92,19 @@ def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env["GIT_OPTIONAL_LOCKS"] = "0"
     for name in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"):
         env.pop(name, None)
-    return subprocess.run(
-        ["git", "-C", str(root), "-c", "core.fsmonitor=false", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
+    command = ["git", "-C", str(root), "-c", "core.fsmonitor=false", *args]
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+    except OSError as exc:
+        return subprocess.CompletedProcess(command, 127, "", str(exc))
 
 
 def _run_safe_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -106,8 +112,7 @@ def _run_safe_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env["GIT_OPTIONAL_LOCKS"] = "0"
     for name in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"):
         env.pop(name, None)
-    return subprocess.run(
-        [
+    command = [
             "git",
             "-C",
             str(root),
@@ -121,14 +126,83 @@ def _run_safe_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
             "-c",
             "diff.external=",
             *args,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
+        ]
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+    except OSError as exc:
+        return subprocess.CompletedProcess(command, 127, "", str(exc))
+
+
+def _read_first_line(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").splitlines()[0]
+    except (OSError, UnicodeError, IndexError):
+        return None
+
+
+def _has_valid_git_head(git_dir: Path) -> bool:
+    head = _read_first_line(git_dir / "HEAD")
+    if head is None:
+        return False
+    if re.fullmatch(r"[0-9A-Fa-f]{40}(?:[0-9A-Fa-f]{24})?", head):
+        return True
+    if not head.startswith("ref: refs/"):
+        return False
+    ref = head.removeprefix("ref: ")
+    parts = ref.split("/")
+    return (
+        all(part not in {"", ".", ".."} for part in parts)
+        and not CONTROL_CHARS.search(ref)
+        and not any(char.isspace() or char in "~^:?*[\\" for char in ref)
+        and "@{" not in ref
     )
+
+
+def _has_valid_git_dir(git_dir: Path) -> bool:
+    if not git_dir.is_dir() or git_dir.is_symlink() or not _has_valid_git_head(git_dir):
+        return False
+    common_dir = git_dir
+    commondir = _read_first_line(git_dir / "commondir")
+    if commondir is not None:
+        common_dir = Path(commondir)
+        if not common_dir.is_absolute():
+            common_dir = git_dir / common_dir
+        try:
+            common_dir = common_dir.resolve()
+        except OSError:
+            return False
+    return (
+        common_dir.is_dir()
+        and not common_dir.is_symlink()
+        and (common_dir / "config").is_file()
+        and (common_dir / "objects").is_dir()
+        and (common_dir / "refs").is_dir()
+    )
+
+
+def _has_valid_git_marker(root: Path) -> bool:
+    marker = root / ".git"
+    if marker.is_dir() and not marker.is_symlink():
+        return _has_valid_git_dir(marker)
+    if not marker.is_file() or marker.is_symlink():
+        return False
+    first_line = _read_first_line(marker)
+    if first_line is None:
+        return False
+    if not first_line.lower().startswith("gitdir:"):
+        return False
+    target = Path(first_line.split(":", 1)[1].strip())
+    if not target.is_absolute():
+        target = root / target
+    return _has_valid_git_dir(target)
 
 
 def find_repo_root(start: Path | str) -> Path | None:
@@ -139,10 +213,14 @@ def find_repo_root(start: Path | str) -> Path | None:
         raise WorkflowError(f"invalid working directory: {exc}") from exc
     if current.is_file():
         current = current.parent
+    candidates = (current, *current.parents)
+    for candidate in candidates:
+        if _has_valid_git_marker(candidate):
+            return candidate.resolve()
     result = _run_git(current, "rev-parse", "--show-toplevel")
     if result.returncode == 0 and result.stdout.strip():
         return Path(result.stdout.strip()).resolve()
-    for candidate in (current, *current.parents):
+    for candidate in candidates:
         state_dir = candidate / STATE_DIR
         if state_dir.is_dir() and not state_dir.is_symlink():
             return candidate
@@ -159,7 +237,11 @@ def workflow_lock(root: Path, workflow: str):
     """Serialize state transitions with an OS advisory lock in Git metadata."""
     git_dir_result = _run_git(root, "rev-parse", "--absolute-git-dir")
     if git_dir_result.returncode != 0 or not git_dir_result.stdout.strip():
-        raise WorkflowError(git_dir_result.stderr.strip() or "cannot locate Git metadata for workflow lock")
+        # Emergency operations must remain available if an export loses .git.
+        # Atomic state writes still prevent torn JSON; cross-process serialization
+        # is unavailable until Git metadata is restored.
+        yield
+        return
     git_dir = Path(git_dir_result.stdout.strip()).resolve()
     lock_path = git_dir / "truedev-workflow-locks" / f"{workflow}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -454,15 +536,24 @@ def detect_default_branch(root: Path) -> str:
 
 def _validate_slice_ref(value: Any) -> str:
     text = _validate_text(value, "slice", maximum=255).replace("\\", "/")
-    if re.fullmatch(r"docs/plan/slice-[A-Za-z0-9._-]+\.md", text) is None:
-        raise WorkflowError("slice must be a relative docs/plan/slice-*.md path")
-    return text
+    path = PurePosixPath(text)
+    if (
+        path.is_absolute()
+        or ":" in text
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or any(SAFE_PATH_COMPONENT.fullmatch(part) is None for part in path.parts[:-1])
+        or re.fullmatch(r"slice-[A-Za-z0-9._-]+\.md", path.name) is None
+    ):
+        raise WorkflowError(
+            "slice must be a repository-relative <plan-dir>/slice-*.md path with safe path components"
+        )
+    return path.as_posix()
 
 
 def current_branch(root: Path) -> str:
     result = _run_git(root, "branch", "--show-current")
     if result.returncode != 0:
-        raise WorkflowError(result.stderr.strip() or "git branch lookup failed")
+        return GIT_UNAVAILABLE
     branch = result.stdout.strip()
     if not branch:
         return DETACHED_HEAD
@@ -515,11 +606,11 @@ def is_sensitive_path(path: str) -> bool:
     if not parts:
         return False
     basename = parts[-1]
-    if basename == ".env.example":
+    if basename in {".env.example", ".env.sample", ".env.template"}:
         return False
     if basename == ".env" or basename.startswith(".env."):
         return True
-    if any(part in {"secret", "secrets", STATE_DIR} for part in parts):
+    if STATE_DIR in parts:
         return True
     if basename in {
         ".npmrc",
@@ -530,7 +621,9 @@ def is_sensitive_path(path: str) -> bool:
         "terraform.tfstate.backup",
     }:
         return True
-    if basename.startswith(("secret.", "secrets.", "credentials", "client_secret")):
+    if re.fullmatch(r"credentials(?:\.(?:json|ya?ml|toml|ini))?", basename):
+        return True
+    if re.fullmatch(r"client_secret[^/]*\.json", basename):
         return True
     if re.fullmatch(r"id_(?:rsa|dsa|ecdsa|ed25519)(?!\.pub).*", basename):
         return True
@@ -752,6 +845,10 @@ def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: boo
     if state is None:
         raise WorkflowError("no active lifecycle workflow")
     active = current_branch(root)
+    if active == DETACHED_HEAD:
+        raise WorkflowError(
+            "cannot recover lifecycle onto detached HEAD; switch to a named branch first"
+        )
     if active == state["branch"]:
         raise WorkflowError("lifecycle already matches the active branch; no recovery is needed")
     previous = state["branch"]
@@ -941,13 +1038,19 @@ def git_preflight(args: argparse.Namespace) -> int:
             index += 1
     sensitive = [path for path in changed if is_sensitive_path(path)]
     if sensitive:
-        problems.append("sensitive or transient paths present: " + ", ".join(sensitive))
+        problems.append(
+            "high-confidence sensitive credential or transient paths present: "
+            + ", ".join(sensitive)
+        )
     tracked_result = _run_git(root, "ls-files", "-z")
     if tracked_result.returncode != 0:
         raise WorkflowError(tracked_result.stderr.strip() or "git ls-files failed")
     tracked_sensitive = [path for path in tracked_result.stdout.split("\0") if path and is_sensitive_path(path)]
     if tracked_sensitive:
-        problems.append("sensitive or transient paths are tracked: " + ", ".join(tracked_sensitive))
+        problems.append(
+            "high-confidence sensitive credential or transient paths are tracked: "
+            + ", ".join(tracked_sensitive)
+        )
     if args.require_clean and changed:
         problems.append("working tree is not clean: " + ", ".join(changed))
     branch = current_branch(root)
@@ -989,11 +1092,28 @@ def inspect_git(args: argparse.Namespace) -> int:
     if args.inspect_command == "git-status":
         command = ("status", "--short", "--branch", "--untracked-files=all")
     elif args.inspect_command == "git-diff":
-        command_parts = ["diff", "--no-ext-diff", "--no-textconv", "--color=never"]
+        command_parts = [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--color=never",
+        ]
+        if args.staged:
+            command_parts.append("--staged")
+        names = _run_safe_git(root, *command_parts, "--name-only", "-z", "--")
+        if names.returncode != 0:
+            raise WorkflowError(names.stderr.strip() or "git diff path inspection failed")
+        safe_paths = [
+            path for path in names.stdout.split("\0") if path and not is_sensitive_path(path)
+        ]
+        if not safe_paths:
+            return 0
         for flag in ("staged", "stat", "check", "name_only", "name_status"):
-            if getattr(args, flag):
+            if flag != "staged" and getattr(args, flag):
                 command_parts.append("--" + flag.replace("_", "-"))
-        command = tuple(command_parts)
+        literal_paths = [f":(literal){path}" for path in safe_paths]
+        command = (*command_parts, "--", *literal_paths)
     else:
         raise WorkflowError(f"unsupported inspection command: {args.inspect_command}")
     result = _run_safe_git(root, *command)
@@ -1035,7 +1155,7 @@ def inspect_file(args: argparse.Namespace) -> int:
     return 0
 
 
-def _hook_payload(event: str) -> dict[str, Any]:
+def _read_hook_payload() -> dict[str, Any]:
     raw = sys.stdin.read(MAX_HOOK_BYTES + 1)
     if len(raw.encode("utf-8")) > MAX_HOOK_BYTES:
         raise WorkflowError(f"hook input exceeds {MAX_HOOK_BYTES} bytes")
@@ -1045,6 +1165,10 @@ def _hook_payload(event: str) -> dict[str, Any]:
         raise WorkflowError(f"invalid hook input: {exc}") from exc
     if not isinstance(payload, dict):
         raise WorkflowError("hook input must be an object")
+    return payload
+
+
+def _validate_hook_payload(payload: Mapping[str, Any], event: str) -> None:
     cwd = payload.get("cwd")
     if cwd is not None:
         _validate_text(cwd, "hook input cwd", maximum=32768)
@@ -1060,7 +1184,32 @@ def _hook_payload(event: str) -> dict[str, Any]:
         active = payload.get("stop_hook_active")
         if active is not None and not isinstance(active, bool):
             raise WorkflowError("hook input stop_hook_active must be boolean")
-    return payload
+
+
+def _has_workflow_state(root: Path | None) -> bool:
+    if root is None:
+        return False
+    return any(
+        path.exists() or path.is_symlink()
+        for path in (state_path(root, "project-init"), state_path(root, "lifecycle"))
+    )
+
+
+def _hook_context(event: str) -> tuple[dict[str, Any] | None, Path | None]:
+    """Read only enough input to preserve no-state inertness before strict validation."""
+    try:
+        payload = _read_hook_payload()
+    except WorkflowError:
+        root = find_repo_root(Path.cwd())
+        if not _has_workflow_state(root):
+            return None, root
+        raise
+    cwd = payload.get("cwd")
+    root = find_repo_root(cwd if isinstance(cwd, str) and cwd.strip() else Path.cwd())
+    if not _has_workflow_state(root):
+        return payload, root
+    _validate_hook_payload(payload, event)
+    return payload, root
 
 
 def _emit(value: Mapping[str, Any]) -> int:
@@ -1093,10 +1242,9 @@ def _is_safe_gate_command(payload: Mapping[str, Any], root: Path) -> bool:
     if match is None:
         return False
     runner = match.group("runner").strip("\"'")
-    cwd = Path(str(payload.get("cwd") or Path.cwd()))
     candidate = Path(runner)
     if not candidate.is_absolute():
-        candidate = cwd / candidate
+        candidate = root / candidate
     try:
         return candidate.resolve() == Path(__file__).resolve()
     except OSError:
@@ -1117,9 +1265,8 @@ def _active_states(root: Path) -> list[tuple[str, dict[str, Any]]]:
 
 
 def hook_pre_tool() -> int:
-    payload = _hook_payload("pre-tool")
-    root = find_repo_root(payload.get("cwd") or Path.cwd())
-    if root is None:
+    payload, root = _hook_context("pre-tool")
+    if payload is None or root is None:
         return 0
     if _is_safe_gate_command(payload, root):
         return 0
@@ -1159,11 +1306,10 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
 
 
 def hook_session_start() -> int:
-    payload = _hook_payload("session-start")
-    if payload.get("source") != "compact":
+    payload, root = _hook_context("session-start")
+    if payload is None or root is None:
         return 0
-    root = find_repo_root(payload.get("cwd") or Path.cwd())
-    if root is None:
+    if payload.get("source") != "compact":
         return 0
     try:
         states = _active_states(root)
@@ -1211,11 +1357,10 @@ def hook_session_start() -> int:
 
 
 def hook_stop() -> int:
-    payload = _hook_payload("stop")
-    if payload.get("stop_hook_active") is True:
+    payload, root = _hook_context("stop")
+    if payload is None or root is None:
         return 0
-    root = find_repo_root(payload.get("cwd") or Path.cwd())
-    if root is None:
+    if payload.get("stop_hook_active") is True:
         return 0
     try:
         states = _active_states(root)
