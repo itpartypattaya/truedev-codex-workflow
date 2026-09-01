@@ -70,6 +70,8 @@ class WorkflowFixture(unittest.TestCase):
         git(root, "init", "-b", "main")
         git(root, "config", "user.email", "test@example.invalid")
         git(root, "config", "user.name", "TrueDev Test")
+        # A background `gc --auto` keeps .git busy and breaks temp-directory cleanup.
+        git(root, "config", "gc.auto", "0")
         (root / "README.md").write_text("fixture\n", encoding="utf-8")
         (root / ".gitignore").write_text(".truedev-workflow/\n", encoding="utf-8")
         git(root, "add", "README.md", ".gitignore")
@@ -371,16 +373,19 @@ class ReviewRoundSevenTests(WorkflowFixture):
         self.assertEqual(workflow._submodule_paths(self.root), [])
 
     def test_oversized_exclusion_list_refuses_instead_of_truncating(self) -> None:
-        for index in range(400):
-            area = self.root / ("area%03d" % index)
-            area.mkdir()
-            (area / ".env").write_text("SECRET=%d\n" % index, encoding="utf-8")
+        # The budget is measured in bytes, so a few deeply nested names reach it
+        # without the churn of hundreds of files.
+        deep = "/".join("nested-directory-level-%02d" % level for level in range(6))
+        areas = [self.root / (deep + "/area-%02d" % index) for index in range(60)]
+        for area in areas:
+            area.mkdir(parents=True, exist_ok=True)
+            (area / ".env").write_text("SECRET=1\n", encoding="utf-8")
             (area / "code.txt").write_text("v1\n", encoding="utf-8")
         git(self.root, "add", "-Af")
         git(self.root, "commit", "-m", "seed")
-        for index in range(400):
-            (self.root / ("area%03d" % index) / ".env").write_text("changed\n", encoding="utf-8")
-            (self.root / ("area%03d" % index) / "code.txt").write_text("v2\n", encoding="utf-8")
+        for area in areas:
+            (area / ".env").write_text("changed\n", encoding="utf-8")
+            (area / "code.txt").write_text("v2\n", encoding="utf-8")
 
         code, output, error = self.cli("inspect", "git-diff", "--stat")
         self.assertEqual(code, 2, error)
