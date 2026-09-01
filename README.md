@@ -72,7 +72,7 @@ specification
 ```
 
 Active state is stored below `.truedev-workflow/` at the repository root and is Git-ignored. The
-runner writes state atomically, rejects invalid transitions, and archives completed receipts below
+runner serializes concurrent transitions, writes state atomically, rejects invalid transitions, and archives completed receipts below
 `.truedev-workflow/history/`.
 
 After PLAN, the lifecycle sets a compact gate. A real Codex compact session clears it and injects
@@ -94,6 +94,10 @@ If an active state file is malformed, matching mutating tool calls fail closed. 
 `abandon --user-confirmed` preserves its original bytes before a clean restart. A valid lifecycle
 whose branch changed can be rebound only with `recover --accept-current-branch --user-confirmed`.
 If no active state exists, the plugin is inert.
+
+While a gate is open, evidence reads use the bundled `inspect git-status`, `inspect git-diff`, and
+`inspect file` commands. Raw shell reads are blocked so Git helpers and PowerShell providers cannot
+turn a nominally read-only exemption into code execution or an out-of-repository read.
 
 ## Git safety
 

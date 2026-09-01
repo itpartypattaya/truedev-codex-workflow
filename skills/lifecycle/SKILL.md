@@ -96,9 +96,18 @@ Before `gate`, finish the work and present the evidence the user needs to decide
 mutating the repository until approval. A vague “continue” does not approve a named gate when the
 decision or consequences are unclear.
 
-While a gate is open, use only the runner's validation/status commands or narrow read-only inspection
-commands (`git status/diff/log/show` and repository-local non-sensitive file reads). Chaining,
-redirection, writes, and sensitive-path reads remain blocked.
+While a gate is open, use only the runner's validation/status commands or its hardened inspection
+commands. Raw shell reads and raw Git inspection remain blocked because Git helpers and PowerShell
+providers can execute code or escape repository paths:
+
+```text
+python3 <RUNNER> inspect git-status
+python3 <RUNNER> inspect git-diff [--staged] [--stat|--check|--name-only|--name-status]
+python3 <RUNNER> inspect file --path <repository-relative-non-sensitive-file>
+```
+
+The file inspector accepts only regular UTF-8 files inside the Git root, rejects symlinks and
+sensitive paths, and caps output size. Chaining, redirection, and writes remain blocked.
 
 ## Step order
 

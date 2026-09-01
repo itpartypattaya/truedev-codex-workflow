@@ -1,6 +1,9 @@
 interface:
   display_name: "TrueDev Lifecycle"
   short_description: "Deliver one planned slice through explicit gates."
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/logo.svg"
+  brand_color: "#5B21B6"
   default_prompt: "Use $lifecycle to start or continue the next planned slice safely."
 policy:
   allow_implicit_invocation: true

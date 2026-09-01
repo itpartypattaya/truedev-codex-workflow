@@ -9,7 +9,9 @@ boundary: Codex hosts may have tool paths that do not emit hook events.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import datetime as dt
+from functools import wraps
 import json
 import os
 from pathlib import Path
@@ -17,11 +19,15 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Iterable, Mapping, Sequence
 
 
 SCHEMA_VERSION = 4
 MAX_STATE_BYTES = 1024 * 1024
+MAX_HOOK_BYTES = 1024 * 1024
+MAX_INSPECT_FILE_BYTES = 1024 * 1024
+LOCK_TIMEOUT_SECONDS = 5.0
 DETACHED_HEAD = "(detached)"
 STATE_DIR = ".truedev-workflow"
 LIFECYCLE_FILE = "lifecycle.json"
@@ -60,6 +66,8 @@ SAFE_RUNNER_COMMAND = re.compile(
     r"(?:(?:lifecycle|project-init)\s+(?:status|validate)|"
     r"project-init\s+validate-slices(?:\s+--plan-dir\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+))?|"
     r"git-preflight(?:\s+(?:--require-clean|--expected-branch\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+)))*|"
+    r"inspect\s+(?:git-status|git-diff(?:\s+(?:--staged|--stat|--check|--name-only|--name-status))*|"
+    r"file\s+--path\s+(?:\"[^\"]+\"|'[^']+'|[^\s]+))|"
     r"(?:lifecycle|project-init)\s+abandon\s+--user-confirmed|"
     r"lifecycle\s+recover\s+--accept-current-branch\s+--user-confirmed|"
     r"lifecycle\s+release-compact\s+--user-confirmed|"
@@ -78,33 +86,117 @@ def utc_now() -> str:
 
 
 def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    for name in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"):
+        env.pop(name, None)
     return subprocess.run(
-        ["git", "-C", str(root), *args],
+        ["git", "-C", str(root), "-c", "core.fsmonitor=false", *args],
         check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
+    )
+
+
+def _run_safe_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    for name in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"):
+        env.pop(name, None)
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "--no-pager",
+            "-c",
+            "core.pager=cat",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "pager.diff=false",
+            "-c",
+            "diff.external=",
+            *args,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
     )
 
 
 def find_repo_root(start: Path | str) -> Path | None:
     """Find a repo/state root even when Codex starts in a nested directory."""
-    current = Path(start).resolve()
+    try:
+        current = Path(start).resolve()
+    except (OSError, TypeError, ValueError) as exc:
+        raise WorkflowError(f"invalid working directory: {exc}") from exc
     if current.is_file():
         current = current.parent
-    for candidate in (current, *current.parents):
-        if (candidate / STATE_DIR).exists() or (candidate / ".git").exists():
-            return candidate
     result = _run_git(current, "rev-parse", "--show-toplevel")
     if result.returncode == 0 and result.stdout.strip():
         return Path(result.stdout.strip()).resolve()
+    for candidate in (current, *current.parents):
+        state_dir = candidate / STATE_DIR
+        if state_dir.is_dir() and not state_dir.is_symlink():
+            return candidate
     return None
 
 
 def state_path(root: Path, workflow: str) -> Path:
     filename = LIFECYCLE_FILE if workflow == "lifecycle" else PROJECT_INIT_FILE
     return root / STATE_DIR / filename
+
+
+@contextmanager
+def workflow_lock(root: Path, workflow: str):
+    """Serialize state transitions with an OS advisory lock in Git metadata."""
+    git_dir_result = _run_git(root, "rev-parse", "--absolute-git-dir")
+    if git_dir_result.returncode != 0 or not git_dir_result.stdout.strip():
+        raise WorkflowError(git_dir_result.stderr.strip() or "cannot locate Git metadata for workflow lock")
+    git_dir = Path(git_dir_result.stdout.strip()).resolve()
+    lock_path = git_dir / "truedev-workflow-locks" / f"{workflow}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise WorkflowError(f"timed out waiting for the {workflow} state lock") from exc
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -394,6 +486,29 @@ def _repo_root_or_error(cwd: str | Path | None = None) -> Path:
     return root
 
 
+def _lock_workflow(workflow: str):
+    def decorate(function):
+        @wraps(function)
+        def locked(*args, **kwargs):
+            root = _repo_root_or_error()
+            with workflow_lock(root, workflow):
+                return function(*args, **kwargs)
+
+        return locked
+
+    return decorate
+
+
+def _lock_named_workflow(function):
+    @wraps(function)
+    def locked(workflow: str, *args, **kwargs):
+        root = _repo_root_or_error()
+        with workflow_lock(root, workflow):
+            return function(workflow, *args, **kwargs)
+
+    return locked
+
+
 def is_sensitive_path(path: str) -> bool:
     normalized = path.replace("\\", "/").strip('"').lower()
     parts = [part for part in normalized.split("/") if part]
@@ -406,13 +521,26 @@ def is_sensitive_path(path: str) -> bool:
         return True
     if any(part in {"secret", "secrets", STATE_DIR} for part in parts):
         return True
-    if basename in {".npmrc", ".pypirc"}:
+    if basename in {
+        ".npmrc",
+        ".pypirc",
+        "auth.json",
+        "kubeconfig",
+        "terraform.tfstate",
+        "terraform.tfstate.backup",
+    }:
         return True
-    if basename.startswith(("secret.", "secrets.", "credentials", "id_rsa")):
+    if basename.startswith(("secret.", "secrets.", "credentials", "client_secret")):
+        return True
+    if re.fullmatch(r"id_(?:rsa|dsa|ecdsa|ed25519)(?!\.pub).*", basename):
         return True
     if basename.startswith("serviceaccount") and basename.endswith(".json"):
         return True
-    return basename.endswith((".key", ".pem", ".p12", ".pfx", ".jks", ".keystore"))
+    if basename == "application_default_credentials.json":
+        return True
+    if len(parts) >= 2 and parts[-2:] == [".docker", "config.json"]:
+        return True
+    return basename.endswith((".key", ".pem", ".p12", ".pfx", ".jks", ".keystore", ".tfstate"))
 
 
 def require_state_ignored(root: Path, workflow: str) -> None:
@@ -427,6 +555,7 @@ def require_state_ignored(root: Path, workflow: str) -> None:
         )
 
 
+@_lock_workflow("lifecycle")
 def lifecycle_start(args: argparse.Namespace) -> int:
     root = _repo_root_or_error()
     path = state_path(root, "lifecycle")
@@ -459,6 +588,7 @@ def lifecycle_start(args: argparse.Namespace) -> int:
     return 0
 
 
+@_lock_workflow("project-init")
 def project_start(args: argparse.Namespace) -> int:
     root = _repo_root_or_error()
     path = state_path(root, "project-init")
@@ -484,6 +614,7 @@ def project_start(args: argparse.Namespace) -> int:
     return 0
 
 
+@_lock_named_workflow
 def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool = False) -> int:
     root = _repo_root_or_error()
     state = load_state(root, workflow)
@@ -547,6 +678,7 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
     return 0
 
 
+@_lock_workflow("lifecycle")
 def lifecycle_skip_components(args: argparse.Namespace) -> int:
     root = _repo_root_or_error()
     state = load_state(root, "lifecycle")
@@ -597,6 +729,7 @@ def _archive_raw_state(root: Path, workflow: str, label: str) -> Path:
     return destination
 
 
+@_lock_named_workflow
 def abandon_workflow(workflow: str, *, user_confirmed: bool) -> int:
     if not user_confirmed:
         raise WorkflowError("abandon requires --user-confirmed after an explicit user message")
@@ -608,6 +741,7 @@ def abandon_workflow(workflow: str, *, user_confirmed: bool) -> int:
     return 0
 
 
+@_lock_workflow("lifecycle")
 def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: bool) -> int:
     if not accept_current_branch or not user_confirmed:
         raise WorkflowError(
@@ -629,6 +763,7 @@ def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: boo
     return 0
 
 
+@_lock_workflow("lifecycle")
 def release_compact_gate(*, user_confirmed: bool) -> int:
     if not user_confirmed:
         raise WorkflowError("compact release requires --user-confirmed after an explicit user message")
@@ -757,6 +892,7 @@ def validate_command(workflow: str) -> int:
     return 0
 
 
+@_lock_named_workflow
 def archive_workflow(workflow: str) -> int:
     root = _repo_root_or_error()
     source = state_path(root, workflow)
@@ -848,13 +984,82 @@ def git_preflight(args: argparse.Namespace) -> int:
     return 0 if not problems else 2
 
 
-def _hook_payload() -> dict[str, Any]:
+def inspect_git(args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    if args.inspect_command == "git-status":
+        command = ("status", "--short", "--branch", "--untracked-files=all")
+    elif args.inspect_command == "git-diff":
+        command_parts = ["diff", "--no-ext-diff", "--no-textconv", "--color=never"]
+        for flag in ("staged", "stat", "check", "name_only", "name_status"):
+            if getattr(args, flag):
+                command_parts.append("--" + flag.replace("_", "-"))
+        command = tuple(command_parts)
+    else:
+        raise WorkflowError(f"unsupported inspection command: {args.inspect_command}")
+    result = _run_safe_git(root, *command)
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.returncode != 0:
+        raise WorkflowError(result.stderr.strip() or f"git {command[0]} inspection failed")
+    return 0
+
+
+def inspect_file(args: argparse.Namespace) -> int:
+    root = _repo_root_or_error().resolve()
+    raw_path = _validate_text(args.path, "inspect path", maximum=4096).replace("\\", "/")
+    if Path(raw_path).is_absolute() or ":" in raw_path or any(char in raw_path for char in "*?[]"):
+        raise WorkflowError("inspect path must be a literal repository-relative path")
+    candidate = root / raw_path
     try:
-        payload = json.load(sys.stdin)
+        resolved = candidate.resolve(strict=True)
+        relative = resolved.relative_to(root).as_posix()
+    except (OSError, ValueError) as exc:
+        raise WorkflowError("inspect path must resolve to a file inside the repository") from exc
+    cursor = root
+    for part in Path(raw_path).parts:
+        cursor /= part
+        if cursor.is_symlink():
+            raise WorkflowError("inspect path must not contain symlinks")
+    if is_sensitive_path(relative):
+        raise WorkflowError(f"refusing to inspect a sensitive path: {relative}")
+    if not resolved.is_file():
+        raise WorkflowError(f"inspect path is not a regular file: {relative}")
+    try:
+        raw = resolved.read_bytes()
+        if len(raw) > MAX_INSPECT_FILE_BYTES:
+            raise WorkflowError(f"inspect file exceeds {MAX_INSPECT_FILE_BYTES} bytes")
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise WorkflowError(f"cannot inspect {relative} as UTF-8: {exc}") from exc
+    print(text, end="" if text.endswith("\n") else "\n")
+    return 0
+
+
+def _hook_payload(event: str) -> dict[str, Any]:
+    raw = sys.stdin.read(MAX_HOOK_BYTES + 1)
+    if len(raw.encode("utf-8")) > MAX_HOOK_BYTES:
+        raise WorkflowError(f"hook input exceeds {MAX_HOOK_BYTES} bytes")
+    try:
+        payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise WorkflowError(f"invalid hook input: {exc}") from exc
     if not isinstance(payload, dict):
         raise WorkflowError("hook input must be an object")
+    cwd = payload.get("cwd")
+    if cwd is not None:
+        _validate_text(cwd, "hook input cwd", maximum=32768)
+    if event == "pre-tool":
+        _validate_text(payload.get("tool_name"), "hook input tool_name", maximum=255)
+        if not isinstance(payload.get("tool_input"), dict):
+            raise WorkflowError("hook input tool_input must be an object")
+    elif event == "session-start":
+        source = payload.get("source")
+        if source is not None:
+            _validate_text(source, "hook input source", maximum=255)
+    elif event == "stop":
+        active = payload.get("stop_hook_active")
+        if active is not None and not isinstance(active, bool):
+            raise WorkflowError("hook input stop_hook_active must be boolean")
     return payload
 
 
@@ -875,78 +1080,6 @@ def _deny(reason: str) -> int:
     )
 
 
-def _command_tokens(command: str) -> list[str] | None:
-    if re.fullmatch(r"\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"']+)(?:\s+(?:\"[^\"]*\"|'[^']*'|[^\s\"']+))*\s*", command) is None:
-        return None
-    return [token[1:-1] if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'" else token
-            for token in re.findall(r'\"[^\"]*\"|\'[^\']*\'|[^\s\"\']+', command)]
-
-
-def _is_safe_read_only_command(command: str, root: Path) -> bool:
-    tokens = _command_tokens(command)
-    if not tokens:
-        return False
-    if tokens[0].lower() == "git" and len(tokens) >= 2:
-        action = tokens[1].lower()
-        arguments = tokens[2:]
-        allowed_flags = {
-            "status": {"--short", "--branch", "--porcelain", "--porcelain=v1", "--untracked-files=no", "--untracked-files=normal", "--untracked-files=all"},
-            "diff": {"--cached", "--staged", "--stat", "--check", "--name-only", "--name-status", "--color=never"},
-            "log": {"--oneline", "--decorate", "--all", "--color=never"},
-            "show": {"--stat", "--name-only", "--name-status", "--color=never"},
-        }
-        if action not in allowed_flags:
-            return False
-        after_separator = False
-        index = 0
-        while index < len(arguments):
-            argument = arguments[index]
-            if argument == "--":
-                after_separator = True
-            elif after_separator:
-                if argument.startswith("-") or argument.startswith("../") or is_sensitive_path(argument):
-                    return False
-            elif argument in allowed_flags[action]:
-                pass
-            elif action == "log" and argument == "-n":
-                index += 1
-                if index >= len(arguments) or not arguments[index].isdigit():
-                    return False
-            elif action == "log" and re.fullmatch(r"--max-count=\d+", argument):
-                pass
-            elif argument.startswith("-"):
-                return False
-            else:
-                possible_path = argument.split(":", 1)[-1]
-                if possible_path.startswith("../") or is_sensitive_path(possible_path):
-                    return False
-            index += 1
-        return True
-    if tokens[0].lower() in {"cat", "type", "get-content"}:
-        arguments = tokens[1:]
-        paths: list[str] = []
-        for argument in arguments:
-            if argument in {"--", "-Raw", "-LiteralPath"}:
-                continue
-            if argument.startswith("-"):
-                return False
-            paths.append(argument)
-        if not paths:
-            return False
-        for raw_path in paths:
-            candidate = Path(raw_path)
-            if not candidate.is_absolute():
-                candidate = root / candidate
-            try:
-                relative = candidate.resolve().relative_to(root.resolve()).as_posix()
-            except (OSError, ValueError):
-                return False
-            if is_sensitive_path(relative):
-                return False
-        return True
-    return False
-
-
 def _is_safe_gate_command(payload: Mapping[str, Any], root: Path) -> bool:
     if payload.get("tool_name") != "Bash":
         return False
@@ -956,8 +1089,6 @@ def _is_safe_gate_command(payload: Mapping[str, Any], root: Path) -> bool:
     command = tool_input.get("command")
     if not isinstance(command, str) or SHELL_CONTROL.search(command):
         return False
-    if _is_safe_read_only_command(command, root):
-        return True
     match = SAFE_RUNNER_COMMAND.fullmatch(command)
     if match is None:
         return False
@@ -986,7 +1117,7 @@ def _active_states(root: Path) -> list[tuple[str, dict[str, Any]]]:
 
 
 def hook_pre_tool() -> int:
-    payload = _hook_payload()
+    payload = _hook_payload("pre-tool")
     root = find_repo_root(payload.get("cwd") or Path.cwd())
     if root is None:
         return 0
@@ -1028,7 +1159,7 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
 
 
 def hook_session_start() -> int:
-    payload = _hook_payload()
+    payload = _hook_payload("session-start")
     if payload.get("source") != "compact":
         return 0
     root = find_repo_root(payload.get("cwd") or Path.cwd())
@@ -1036,11 +1167,21 @@ def hook_session_start() -> int:
         return 0
     try:
         states = _active_states(root)
+        refreshed: list[tuple[str, dict[str, Any]]] = []
         for workflow, state in states:
             if workflow == "lifecycle" and state.get("awaiting_compact"):
-                state["awaiting_compact"] = False
-                _history(state, "compact", state["current_step"], "codex-host")
-                save_state(root, workflow, state)
+                with workflow_lock(root, workflow):
+                    locked_state = load_state(root, workflow)
+                    if locked_state is None:
+                        continue
+                    require_lifecycle_branch(root, locked_state)
+                    if locked_state.get("awaiting_compact"):
+                        locked_state["awaiting_compact"] = False
+                        _history(locked_state, "compact", locked_state["current_step"], "codex-host")
+                        save_state(root, workflow, locked_state)
+                    state = locked_state
+            refreshed.append((workflow, state))
+        states = refreshed
     except BranchMismatchError as exc:
         return _emit(
             {
@@ -1070,7 +1211,7 @@ def hook_session_start() -> int:
 
 
 def hook_stop() -> int:
-    payload = _hook_payload()
+    payload = _hook_payload("stop")
     if payload.get("stop_hook_active") is True:
         return 0
     root = find_repo_root(payload.get("cwd") or Path.cwd())
@@ -1183,6 +1324,20 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--expected-branch")
     preflight.set_defaults(func=git_preflight)
 
+    inspect = sub.add_parser("inspect")
+    inspect_sub = inspect.add_subparsers(dest="inspect_command", required=True)
+    inspect_sub.add_parser("git-status").set_defaults(func=inspect_git)
+    inspect_diff = inspect_sub.add_parser("git-diff")
+    inspect_diff.add_argument("--staged", action="store_true")
+    inspect_diff.add_argument("--stat", action="store_true")
+    inspect_diff.add_argument("--check", action="store_true")
+    inspect_diff.add_argument("--name-only", action="store_true")
+    inspect_diff.add_argument("--name-status", action="store_true")
+    inspect_diff.set_defaults(func=inspect_git)
+    inspect_file_parser = inspect_sub.add_parser("file")
+    inspect_file_parser.add_argument("--path", required=True)
+    inspect_file_parser.set_defaults(func=inspect_file)
+
     hook = sub.add_parser("hook")
     hook_sub = hook.add_subparsers(dest="hook_command", required=True)
     hook_sub.add_parser("pre-tool").set_defaults(func=lambda _args: hook_pre_tool())
@@ -1198,6 +1353,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(args.func(args))
     except WorkflowError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        if args.command != "hook":
+            raise
+        print(f"ERROR: hook failed safely: {type(exc).__name__}", file=sys.stderr)
         return 2
 
 
