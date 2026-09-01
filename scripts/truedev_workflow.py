@@ -60,6 +60,7 @@ PROJECT_USER_GATES = frozenset(PROJECT_PHASES[:-1])
 
 VALID_STATUSES = frozenset({"pending", "in_progress", "awaiting_approval", "completed"})
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 SHELL_CONTROL = re.compile(r"(?:\r|\n|;|&&|\|\||(?<!\|)\|(?!\|)|`|\$\(|[<>])")
 SAFE_RUNNER_COMMAND = re.compile(
     r"^\s*(?:(?:python(?:3(?:\.\d+)?)?)|(?:py\s+-3))\s+"
@@ -140,22 +141,68 @@ def _run_safe_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
 
 
+def _read_first_line(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").splitlines()[0]
+    except (OSError, UnicodeError, IndexError):
+        return None
+
+
+def _has_valid_git_head(git_dir: Path) -> bool:
+    head = _read_first_line(git_dir / "HEAD")
+    if head is None:
+        return False
+    if re.fullmatch(r"[0-9A-Fa-f]{40}(?:[0-9A-Fa-f]{24})?", head):
+        return True
+    if not head.startswith("ref: refs/"):
+        return False
+    ref = head.removeprefix("ref: ")
+    parts = ref.split("/")
+    return (
+        all(part not in {"", ".", ".."} for part in parts)
+        and not CONTROL_CHARS.search(ref)
+        and not any(char.isspace() or char in "~^:?*[\\" for char in ref)
+        and "@{" not in ref
+    )
+
+
+def _has_valid_git_dir(git_dir: Path) -> bool:
+    if not git_dir.is_dir() or git_dir.is_symlink() or not _has_valid_git_head(git_dir):
+        return False
+    common_dir = git_dir
+    commondir = _read_first_line(git_dir / "commondir")
+    if commondir is not None:
+        common_dir = Path(commondir)
+        if not common_dir.is_absolute():
+            common_dir = git_dir / common_dir
+        try:
+            common_dir = common_dir.resolve()
+        except OSError:
+            return False
+    return (
+        common_dir.is_dir()
+        and not common_dir.is_symlink()
+        and (common_dir / "config").is_file()
+        and (common_dir / "objects").is_dir()
+        and (common_dir / "refs").is_dir()
+    )
+
+
 def _has_valid_git_marker(root: Path) -> bool:
     marker = root / ".git"
     if marker.is_dir() and not marker.is_symlink():
-        return (marker / "HEAD").is_file()
+        return _has_valid_git_dir(marker)
     if not marker.is_file() or marker.is_symlink():
         return False
-    try:
-        first_line = marker.read_text(encoding="utf-8").splitlines()[0]
-    except (OSError, UnicodeError, IndexError):
+    first_line = _read_first_line(marker)
+    if first_line is None:
         return False
     if not first_line.lower().startswith("gitdir:"):
         return False
     target = Path(first_line.split(":", 1)[1].strip())
     if not target.is_absolute():
         target = root / target
-    return target.is_dir() and (target / "HEAD").is_file()
+    return _has_valid_git_dir(target)
 
 
 def find_repo_root(start: Path | str) -> Path | None:
@@ -494,9 +541,12 @@ def _validate_slice_ref(value: Any) -> str:
         path.is_absolute()
         or ":" in text
         or any(part in {"", ".", ".."} for part in path.parts)
+        or any(SAFE_PATH_COMPONENT.fullmatch(part) is None for part in path.parts[:-1])
         or re.fullmatch(r"slice-[A-Za-z0-9._-]+\.md", path.name) is None
     ):
-        raise WorkflowError("slice must be a repository-relative <plan-dir>/slice-*.md path")
+        raise WorkflowError(
+            "slice must be a repository-relative <plan-dir>/slice-*.md path with safe path components"
+        )
     return path.as_posix()
 
 
@@ -1062,7 +1112,8 @@ def inspect_git(args: argparse.Namespace) -> int:
         for flag in ("staged", "stat", "check", "name_only", "name_status"):
             if flag != "staged" and getattr(args, flag):
                 command_parts.append("--" + flag.replace("_", "-"))
-        command = (*command_parts, "--", *safe_paths)
+        literal_paths = [f":(literal){path}" for path in safe_paths]
+        command = (*command_parts, "--", *literal_paths)
     else:
         raise WorkflowError(f"unsupported inspection command: {args.inspect_command}")
     result = _run_safe_git(root, *command)

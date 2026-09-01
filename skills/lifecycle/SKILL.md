@@ -75,7 +75,9 @@ python3 <RUNNER> lifecycle start --task "<task>" --slice "<plan-dir>/slice-NNN-n
 ```
 
 `--slice` is a repository-relative path. It may use the default `docs/plan/` directory or the same
-custom plan directory passed to `project-init validate-slices --plan-dir`.
+custom plan directory passed to `project-init validate-slices --plan-dir`. Each directory component
+must contain only ASCII letters, digits, `.`, `_`, or `-`, because this validated reference is restored
+after context compaction.
 
 8. Keep Codex's task plan synchronized with the current workflow step when a plan tool is available.
 

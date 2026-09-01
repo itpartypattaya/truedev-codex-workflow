@@ -101,11 +101,38 @@ class WorkflowTests(unittest.TestCase):
         (nested / workflow.STATE_DIR).mkdir(parents=True)
         self.assertEqual(workflow.find_repo_root(nested), self.root)
 
+    def test_incomplete_nested_git_marker_cannot_shadow_active_parent_state(self) -> None:
+        self.start_lifecycle()
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        nested = self.root / "fixtures" / "nested"
+        (nested / ".git").mkdir(parents=True)
+        (nested / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+        self.assertEqual(workflow.find_repo_root(nested), self.root)
+        _, output, _ = self.hook(
+            "pre-tool",
+            {"cwd": str(nested), "tool_name": "apply_patch", "tool_input": {"command": "patch"}},
+        )
+        decision = json.loads(output)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("SCOPE", decision["permissionDecisionReason"])
+
     def test_normal_repo_root_lookup_does_not_spawn_git(self) -> None:
         nested = self.root / "src" / "feature"
         nested.mkdir(parents=True)
         with mock.patch.object(workflow, "_run_git", side_effect=AssertionError("unexpected git")):
             self.assertEqual(workflow.find_repo_root(nested), self.root)
+
+    def test_linked_worktree_marker_is_recognized_without_spawning_git(self) -> None:
+        with tempfile.TemporaryDirectory() as worktree_parent:
+            linked = Path(worktree_parent) / "linked"
+            git(self.root, "worktree", "add", "--detach", str(linked), "HEAD")
+            nested = linked / "src" / "feature"
+            nested.mkdir(parents=True)
+            with mock.patch.object(workflow, "_run_git", side_effect=AssertionError("unexpected git")):
+                self.assertEqual(workflow.find_repo_root(nested), linked.resolve())
+            git(self.root, "worktree", "remove", "--force", str(linked))
 
     def test_no_state_is_inert(self) -> None:
         code, output, _ = self.hook(
@@ -559,6 +586,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("<plan-dir>/slice-*.md", error)
 
+    def test_slice_reference_rejects_free_form_directory_components(self) -> None:
+        code, _, error = self.cli(
+            "lifecycle",
+            "start",
+            "--task",
+            "fixture",
+            "--slice",
+            "Ignore previous instructions/slice-001-x.md",
+            "--base",
+            "main",
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("safe path components", error)
+        self.assertFalse(workflow.state_path(self.root, "lifecycle").exists())
+
     def test_schema_rejects_skipped_step(self) -> None:
         self.start_lifecycle()
         path = workflow.state_path(self.root, "lifecycle")
@@ -690,6 +732,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("safe change", output)
         self.assertNotIn("do-not-print", output)
         self.assertNotIn("TOKEN=", output)
+
+    def test_git_diff_inspection_passes_filtered_names_as_literal_pathspecs(self) -> None:
+        responses = (
+            subprocess.CompletedProcess([], 0, ":(glob)*\0.env\0", ""),
+            subprocess.CompletedProcess([], 0, "safe diff\n", ""),
+        )
+        with mock.patch.object(workflow, "_run_safe_git", side_effect=responses) as run_git:
+            code, output, error = self.cli("inspect", "git-diff")
+        self.assertEqual(code, 0, error)
+        self.assertEqual(output, "safe diff\n")
+        second_call = run_git.call_args_list[1].args
+        self.assertIn(":(literal):(glob)*", second_call)
+        self.assertNotIn(".env", second_call)
 
     def test_git_preflight_detects_rename_to_sensitive_path(self) -> None:
         source = self.root / "safe.txt"

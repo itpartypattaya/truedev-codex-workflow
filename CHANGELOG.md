@@ -16,6 +16,10 @@ versioning follows [Semantic Versioning](https://semver.org/).
   bundled Git diff inspector without blocking ordinary source names such as `secrets.ts`.
 - Accepted repository-relative slice files from a custom plan directory and avoided a Git subprocess
   during normal repository-root discovery.
+- Rejected incomplete nested Git markers and free-form slice-directory components before using them
+  for hook root selection or compact-session context.
+- Passed filtered Git diff filenames back as literal pathspecs so pathspec magic cannot reselect a
+  sensitive file.
 
 ## [1.1.3] — 2026-09-01
 

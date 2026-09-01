@@ -32,8 +32,9 @@ recovered or explicitly abandoned. `abandon --user-confirmed` archives the origi
 removing active state; it never synthesizes approval history. If no state file exists, the plugin is inert.
 
 Session restoration injects only a small allowlisted summary: workflow name, current enum, status,
-validated repository-relative `<plan-dir>/slice-*.md` reference, and compact flag. Task text and arbitrary state values are
-never promoted into developer context.
+validated repository-relative `<plan-dir>/slice-*.md` reference, and compact flag. Every plan-directory
+component is restricted to ASCII letters, digits, `.`, `_`, and `-`. Task text and arbitrary state
+values are never promoted into developer context.
 
 The state and hooks are workflow guardrails. They do not replace repository permissions, sandboxing,
 code review, protected branches, CI, or provider-side authorization.
