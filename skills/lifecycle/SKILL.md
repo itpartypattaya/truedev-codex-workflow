@@ -44,7 +44,8 @@ the user's repository.
   fails for that cause, then make the narrowest fix. Keep these actions inside the normal ordered steps.
 - **recover after a branch change:** stop mutation, show the recorded and active branches, and use
   `recover --accept-current-branch --user-confirmed` only after explicit approval. Never recover
-  onto detached HEAD; switch to a named branch first.
+  onto detached HEAD or a repository whose Git metadata is missing; restore a named branch first, or
+  offer `abandon --user-confirmed`.
 - **invalid or obsolete state:** do not fabricate approvals. Offer `abandon --user-confirmed`, which
   preserves the original state in history before allowing a clean restart.
 - **compact event unavailable:** explain the missing host evidence and use
@@ -113,8 +114,9 @@ python3 <RUNNER> inspect file --path <repository-relative-non-sensitive-file>
 ```
 
 The file inspector accepts only regular UTF-8 files inside the Git root, rejects symlinks and
-high-confidence credential paths, and caps output size. Git-diff inspection omits those paths from
-its output. Chaining, redirection, and writes remain blocked.
+high-confidence credential paths, and caps output size. Git-diff inspection omits those paths and
+prints the list of what it withheld; treat that list as a gap in the evidence rather than as an
+empty change set. Chaining, redirection, and writes remain blocked.
 
 ## Step order
 

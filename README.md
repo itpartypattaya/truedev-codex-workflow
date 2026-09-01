@@ -99,11 +99,14 @@ While a gate is open, evidence reads use the bundled `inspect git-status`, `insp
 `inspect file` commands. Raw shell reads are blocked so Git helpers and PowerShell providers cannot
 turn a nominally read-only exemption into code execution or an out-of-repository read.
 The diff inspector omits high-confidence credential paths such as `.env`, private keys, credential
-stores, and transient workflow state; ordinary source names such as `src/secrets.ts` are not blocked.
+stores, `secrets/` directories, and transient workflow state; ordinary source names such as
+`src/secrets.ts` are not blocked. It names every path it withheld, so a shortened diff is never
+mistaken for a complete one.
 
-On Windows, the hook launcher reads `PLUGIN_ROOT` inside Python instead of assuming either Command
-Prompt `%VAR%` or PowerShell `$env:VAR` expansion. If the installation path is absent, the launcher
-is inert rather than turning a hook bootstrap error into a repository-wide tool denial.
+Both platforms use the same launcher, which reads `PLUGIN_ROOT` inside Python instead of assuming
+Command Prompt `%VAR%`, PowerShell `$env:VAR`, or POSIX shell expansion. The launcher requires an
+absolute installed path: an unset or relative value makes it inert rather than resolving against the
+repository under review or turning a bootstrap error into a repository-wide tool denial.
 
 ## Git safety
 

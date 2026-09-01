@@ -115,15 +115,23 @@ def validate_hooks() -> None:
             for handler in group.get("hooks", []):
                 command = handler.get("command")
                 windows = handler.get("commandWindows")
-                require(isinstance(command, str) and command.startswith('python3 "$PLUGIN_ROOT/'), "POSIX hooks must use python3 and PLUGIN_ROOT")
-                require(
-                    isinstance(windows, str)
-                    and windows.startswith('python -c "')
-                    and "os.environ.get('PLUGIN_ROOT','')" in windows
-                    and "os.path.isfile(p) else 0" in windows,
-                    "Windows hooks must use the shell-neutral, fail-open Python launcher",
-                )
-                require("$env:" not in windows and "%PLUGIN_ROOT%" not in windows, "Windows hooks must not guess the command shell")
+                require(isinstance(command, str) and command.startswith('python3 -c "'), "POSIX hooks must use the python3 launcher")
+                require(isinstance(windows, str) and windows.startswith('python -c "'), "Windows hooks must use the python launcher")
+                for label, launcher in (("POSIX", command), ("Windows", windows)):
+                    require(
+                        "os.environ.get('PLUGIN_ROOT','')" in launcher,
+                        f"{label} hook must read PLUGIN_ROOT inside Python, not through a shell",
+                    )
+                    require(
+                        "os.path.isabs(p) and os.path.isfile(p) else 0" in launcher,
+                        f"{label} hook must require an absolute installed path and fail open otherwise",
+                    )
+                    require(
+                        "$env:" not in launcher
+                        and "%PLUGIN_ROOT%" not in launcher
+                        and "$PLUGIN_ROOT" not in launcher,
+                        f"{label} hook must not guess the command shell",
+                    )
                 require("py -3" not in windows, "Windows hook must not assume a registered py launcher")
 
 

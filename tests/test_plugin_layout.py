@@ -4,12 +4,36 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DECOY = "import pathlib\npathlib.Path('decoy-was-executed').write_text('x')\n"
+
+
+def _python3_is_usable() -> bool:
+    """`python3` on PATH can be a stub (for example the Windows Store alias)."""
+    executable = shutil.which("python3")
+    if executable is None:
+        return False
+    try:
+        probe = subprocess.run([executable, "-c", "pass"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+def plant_decoy(directory: Path) -> Path:
+    """Create the file an empty PLUGIN_ROOT would resolve to from the session cwd."""
+    script = directory / "scripts" / "truedev_workflow.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(DECOY, encoding="utf-8")
+    return directory / "decoy-was-executed"
 
 
 class PluginLayoutTests(unittest.TestCase):
@@ -36,62 +60,105 @@ class PluginLayoutTests(unittest.TestCase):
         for event in hooks.values():
             for group in event:
                 for handler in group["hooks"]:
-                    self.assertIn("$PLUGIN_ROOT", handler["command"])
-                    self.assertIn("os.environ.get('PLUGIN_ROOT','')", handler["commandWindows"])
-                    self.assertIn("os.path.isfile(p) else 0", handler["commandWindows"])
-                    self.assertNotIn("$env:", handler["commandWindows"])
-                    self.assertNotIn("%PLUGIN_ROOT%", handler["commandWindows"])
+                    self.assertTrue(handler["command"].startswith('python3 -c "'))
                     self.assertTrue(handler["commandWindows"].startswith('python -c "'))
+                    for launcher in (handler["command"], handler["commandWindows"]):
+                        self.assertIn("os.environ.get('PLUGIN_ROOT','')", launcher)
+                        # An empty or relative PLUGIN_ROOT must never resolve against the
+                        # session working directory, which is the repository under review.
+                        self.assertIn("os.path.isabs(p) and os.path.isfile(p) else 0", launcher)
+                        self.assertNotIn("$env:", launcher)
+                        self.assertNotIn("%PLUGIN_ROOT%", launcher)
+                        self.assertNotIn("$PLUGIN_ROOT", launcher)
 
-    @unittest.skipUnless(os.name == "nt", "Windows command-shell smoke test")
-    def test_windows_hook_launcher_runs_in_powershell_and_cmd(self) -> None:
+    def test_hook_launcher_never_executes_a_repository_script(self) -> None:
+        """An unusable PLUGIN_ROOT must be inert, not resolve against the session cwd."""
         config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         handler = config["hooks"]["PreToolUse"][0]["hooks"][0]
-        payload = json.dumps({"cwd": str(ROOT), "tool_name": "mcp__unknown__read"})
-        env = os.environ.copy()
-        env["PLUGIN_ROOT"] = str(ROOT)
+        payload = json.dumps(
+            {"cwd": str(ROOT), "tool_name": "Bash", "tool_input": {"command": "echo hi"}}
+        )
+        for launcher in (handler["command"], handler["commandWindows"]):
+            body = shlex.split(launcher, posix=True)[2]
+            for label, plugin_root in (
+                ("unset", None),
+                ("empty", ""),
+                ("relative", "."),
+                ("relative-nested", os.path.join(".", "nested")),
+            ):
+                with self.subTest(launcher=launcher.split()[0], plugin_root=label):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp = Path(temp_dir)
+                        marker = plant_decoy(temp)
+                        env = os.environ.copy()
+                        env.pop("PLUGIN_ROOT", None)
+                        if plugin_root is not None:
+                            env["PLUGIN_ROOT"] = plugin_root
+                        result = subprocess.run(
+                            [sys.executable, "-c", body],
+                            cwd=temp,
+                            env=env,
+                            input=payload,
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            timeout=30,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout, "")
+                        self.assertFalse(marker.exists(), "hook executed a repository script")
+
+    def test_hook_launcher_runs_the_installed_runner_in_every_shell(self) -> None:
+        config = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        handler = config["hooks"]["PreToolUse"][0]["hooks"][0]
+        payload = json.dumps(
+            {"cwd": str(ROOT), "tool_name": "Bash", "tool_input": {"command": "echo hi"}}
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            command_file = temp / "hook.cmd"
-            powershell_file = temp / "hook.ps1"
-            command_file.write_text("@echo off\r\n" + handler["commandWindows"] + "\r\n")
-            powershell_file.write_text(handler["commandWindows"] + "\n", encoding="utf-8")
-            for shell in (
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(powershell_file),
-                ],
-                ["cmd.exe", "/d", "/c", str(command_file)],
-            ):
-                result = subprocess.run(
-                    shell,
-                    cwd=ROOT,
-                    env=env,
-                    input=payload,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=15,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "")
-
-            env.pop("PLUGIN_ROOT", None)
-            missing_root = subprocess.run(
-                ["cmd.exe", "/d", "/c", str(command_file)],
-                cwd=ROOT,
-                env=env,
-                input=payload,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=15,
-            )
-            self.assertEqual(missing_root.returncode, 0, missing_root.stderr)
+            marker = plant_decoy(temp)
+            shells: list[tuple[str, list[str]]] = []
+            if os.name == "nt":
+                command_file = temp / "hook.cmd"
+                powershell_file = temp / "hook.ps1"
+                command_file.write_text("@echo off\r\n" + handler["commandWindows"] + "\r\n")
+                powershell_file.write_text(handler["commandWindows"] + "\n", encoding="utf-8")
+                shells.append(("cmd", ["cmd.exe", "/d", "/c", str(command_file)]))
+                if shutil.which("powershell.exe"):
+                    shells.append(
+                        (
+                            "powershell",
+                            [
+                                "powershell.exe",
+                                "-NoProfile",
+                                "-ExecutionPolicy",
+                                "Bypass",
+                                "-File",
+                                str(powershell_file),
+                            ],
+                        )
+                    )
+            posix_shell = shutil.which("sh")
+            if posix_shell and _python3_is_usable():
+                shells.append(("sh", [posix_shell, "-c", handler["command"]]))
+            if not shells:
+                self.skipTest("no supported command shell available")
+            env = os.environ.copy()
+            env["PLUGIN_ROOT"] = str(ROOT)
+            for name, shell in shells:
+                with self.subTest(shell=name):
+                    result = subprocess.run(
+                        shell,
+                        cwd=temp,
+                        env=env,
+                        input=payload,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse(marker.exists(), "hook executed a repository script")
 
     def test_skills_have_matching_names_and_stay_under_500_lines(self) -> None:
         for name in ("lifecycle", "project-init"):

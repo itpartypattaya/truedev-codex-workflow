@@ -260,7 +260,7 @@ class WorkflowTests(unittest.TestCase):
         state = workflow.load_state(self.root, "lifecycle")
         self.assertEqual(state["branch"], "main")
 
-    def test_missing_git_metadata_keeps_status_recover_and_abandon_available(self) -> None:
+    def test_missing_git_metadata_keeps_status_and_abandon_but_refuses_recovery(self) -> None:
         self.start_lifecycle()
         git_dir = self.root / ".git"
         removed_git_dir = self.root / ".git-removed"
@@ -270,15 +270,40 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(code, 0, error)
         self.assertIn(f"active: {workflow.GIT_UNAVAILABLE}; MISMATCH", output)
 
+        # Recording the placeholder would make the branch guard match itself forever.
         code, _, error = self.cli(
             "lifecycle", "recover", "--accept-current-branch", "--user-confirmed"
         )
-        self.assertEqual(code, 0, error)
-        self.assertEqual(workflow.load_state(self.root, "lifecycle")["branch"], workflow.GIT_UNAVAILABLE)
+        self.assertEqual(code, 2)
+        self.assertIn("Git metadata is unavailable", error)
+        self.assertEqual(workflow.load_state(self.root, "lifecycle")["branch"], "main")
 
         code, _, error = self.cli("lifecycle", "abandon", "--user-confirmed")
         self.assertEqual(code, 0, error)
         self.assertFalse(workflow.state_path(self.root, "lifecycle").exists())
+
+    def test_branch_placeholder_in_state_never_satisfies_the_branch_guard(self) -> None:
+        self.start_lifecycle()
+        for placeholder in (workflow.GIT_UNAVAILABLE, workflow.DETACHED_HEAD):
+            with self.subTest(placeholder=placeholder):
+                state = workflow.load_state(self.root, "lifecycle")
+                state["branch"] = placeholder
+                workflow.save_state(self.root, "lifecycle", state)
+
+                code, _, error = self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+                self.assertEqual(code, 2)
+                self.assertIn("placeholder", error)
+
+                _, output, _ = self.hook(
+                    "pre-tool",
+                    {
+                        "cwd": str(self.root),
+                        "tool_name": "Bash",
+                        "tool_input": {"command": "rm -rf src"},
+                    },
+                )
+                decision = json.loads(output)["hookSpecificOutput"]
+                self.assertEqual(decision["permissionDecision"], "deny")
 
     def test_lifecycle_start_rejects_detached_head_with_start_specific_message(self) -> None:
         git(self.root, "checkout", "--detach", "HEAD")
@@ -375,6 +400,44 @@ class WorkflowTests(unittest.TestCase):
             json.loads(denied_output)["hookSpecificOutput"]["permissionDecision"],
             "deny",
         )
+
+    def test_relative_runner_is_resolved_against_the_tool_call_directory(self) -> None:
+        """A relative runner must be judged from the cwd the shell will actually use."""
+        self.start_lifecycle()
+        self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.cli("lifecycle", "gate", "--step", "SCOPE")
+        runner = ROOT / "scripts" / "truedev_workflow.py"
+        try:
+            relative = os.path.relpath(runner, self.root).replace("\\", "/")
+        except ValueError:  # pragma: no cover - different Windows drives
+            self.skipTest("runner and fixture repository are on different drives")
+        nested = self.root / "sub"
+        nested.mkdir()
+        command = f'python "{relative}" lifecycle status'
+
+        # From the repository root the relative path really is the bundled runner.
+        _, output, _ = self.hook(
+            "pre-tool",
+            {"cwd": str(self.root), "tool_name": "Bash", "tool_input": {"command": command}},
+        )
+        self.assertEqual(output, "")
+
+        # From a subdirectory the very same string names a different, repository-controlled
+        # file, so approving it would sanction a substitute runner.
+        _, output, _ = self.hook(
+            "pre-tool",
+            {"cwd": str(nested), "tool_name": "Bash", "tool_input": {"command": command}},
+        )
+        decision = json.loads(output)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+        # Without a usable cwd there is no base to judge a relative path against.
+        for payload in (
+            {"tool_name": "Bash", "tool_input": {"command": command}},
+            {"cwd": "  ", "tool_name": "Bash", "tool_input": {"command": command}},
+            {"cwd": 17, "tool_name": "Bash", "tool_input": {"command": command}},
+        ):
+            self.assertFalse(workflow._is_safe_gate_command(payload), payload.get("cwd"))
 
     def test_user_gate_allows_only_bundled_read_only_inspection(self) -> None:
         self.start_lifecycle()
@@ -704,6 +767,15 @@ class WorkflowTests(unittest.TestCase):
             "store.keystore",
             ".npmrc",
             ".pypirc",
+            # Conventional secret stores, recognised by data extension or store directory.
+            "config/secrets.yaml",
+            "config/secrets.json",
+            "app/secrets.toml",
+            "k8s/secret.yaml",
+            "vault/secrets.enc.yaml",
+            "secrets/db.txt",
+            "secrets/prod.env",
+            "ops/secrets/rds.ini",
         )
         for path in sensitive:
             self.assertTrue(workflow.is_sensitive_path(path), path)
@@ -711,9 +783,14 @@ class WorkflowTests(unittest.TestCase):
             "src/secrets.ts",
             "lib/secrets.ts",
             "src/secret/handler.ts",
+            "src/secrets/index.ts",
+            "src/secrets/loader.go",
             "client_secret_helper.py",
             "secrets.example.json",
-            "config/secrets.yaml",
+            "secrets.sample.yaml",
+            "docs/secrets.md",
+            "secrets/README.md",
+            "pkg/secretsmanager.go",
             "server.crt",
         )
         for path in ordinary:
@@ -733,18 +810,64 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("do-not-print", output)
         self.assertNotIn("TOKEN=", output)
 
-    def test_git_diff_inspection_passes_filtered_names_as_literal_pathspecs(self) -> None:
+    def test_git_diff_inspection_excludes_omitted_names_as_literal_pathspecs(self) -> None:
         responses = (
-            subprocess.CompletedProcess([], 0, ":(glob)*\0.env\0", ""),
+            subprocess.CompletedProcess([], 0, ":(glob)*/.env\0safe.txt\0", ""),
             subprocess.CompletedProcess([], 0, "safe diff\n", ""),
         )
         with mock.patch.object(workflow, "_run_safe_git", side_effect=responses) as run_git:
             code, output, error = self.cli("inspect", "git-diff")
         self.assertEqual(code, 0, error)
-        self.assertEqual(output, "safe diff\n")
+        self.assertIn("safe diff", output)
         second_call = run_git.call_args_list[1].args
-        self.assertIn(":(literal):(glob)*", second_call)
-        self.assertNotIn(".env", second_call)
+        # Pathspec magic inside a filename must stay inert.
+        self.assertIn(":(exclude,literal):(glob)*/.env", second_call)
+        self.assertNotIn(":(glob)*/.env", second_call)
+        # The command line grows with the number of withheld files, not the change set.
+        self.assertNotIn("safe.txt", second_call)
+
+    def test_git_diff_inspection_reports_what_it_withheld(self) -> None:
+        secret = self.root / ".env"
+        secret.write_text("TOKEN=old\n", encoding="utf-8")
+        git(self.root, "add", "-f", ".env")
+        git(self.root, "commit", "-m", "tracked secret fixture")
+        secret.write_text("TOKEN=do-not-print\n", encoding="utf-8")
+
+        # Only a sensitive file changed: an empty diff would read as "nothing changed".
+        code, output, error = self.cli("inspect", "git-diff")
+        self.assertEqual(code, 0, error)
+        self.assertIn("omitted 1 sensitive path(s)", output)
+        self.assertIn(".env", output)
+        self.assertNotIn("do-not-print", output)
+
+        (self.root / "README.md").write_text("safe change\n", encoding="utf-8")
+        code, output, error = self.cli("inspect", "git-diff")
+        self.assertEqual(code, 0, error)
+        self.assertIn("omitted 1 sensitive path(s)", output)
+        self.assertIn("safe change", output)
+        self.assertNotIn("do-not-print", output)
+
+    def test_git_diff_check_reports_findings_instead_of_failing(self) -> None:
+        (self.root / "README.md").write_text("fixture\ntrailing space \n", encoding="utf-8")
+        code, output, error = self.cli("inspect", "git-diff", "--check")
+        self.assertEqual(code, 2)
+        self.assertIn("trailing whitespace", output)
+        self.assertNotIn("ERROR", error)
+
+        git(self.root, "checkout", "--", "README.md")
+        code, _, error = self.cli("inspect", "git-diff", "--check")
+        self.assertEqual(code, 0, error)
+
+    def test_git_diff_inspection_without_secrets_passes_no_pathspecs(self) -> None:
+        (self.root / "README.md").write_text("safe change\n", encoding="utf-8")
+        with mock.patch.object(
+            workflow, "_run_safe_git", wraps=workflow._run_safe_git
+        ) as run_git:
+            code, output, error = self.cli("inspect", "git-diff")
+        self.assertEqual(code, 0, error)
+        self.assertIn("safe change", output)
+        self.assertNotIn("omitted", output)
+        self.assertNotIn("--", run_git.call_args_list[1].args)
 
     def test_git_preflight_detects_rename_to_sensitive_path(self) -> None:
         source = self.root / "safe.txt"
