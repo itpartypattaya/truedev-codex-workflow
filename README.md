@@ -1,5 +1,7 @@
 # TrueDev Workflow
 
+**English** | [Русский](README.ru.md)
+
 TrueDev Workflow is a native Codex plugin for long product and engineering tasks. It turns a
 specification into durable project documents, then delivers one vertical slice at a time through
 explicit scope, verification, review, and closeout gates.
