@@ -4,6 +4,28 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.16] — 2026-09-02
+
+### Added
+- A session-start notice when a newer version is available. An install stays on the version it was
+  made with until someone updates it, so a stale install is invisible unless something says so.
+- `SessionStart` gains a second, anchored matcher for `startup|resume`. It reads no workflow state
+  and carries no enforcement — a stale install is worth one line, not a gate.
+
+### Changed
+- The default comparison is entirely local: it reads the marketplace clone already on disk. The
+  network half is opt-in through `TRUEDEV_UPDATE_CHECK=network`, because reaching out is a
+  different promise from reading a file. `TRUEDEV_UPDATE_CHECK=off` disables both.
+- The check runs at most once a day, a failure is silent, and a version that cannot be parsed is
+  never treated as newer. A version notice must not be able to break a session.
+- The plugin never updates itself. Updating runs new code on the user's machine, and the injected
+  context says so rather than leaving the model to decide.
+- `PRIVACY.md` no longer claims there is no bundled network client, because that would now be
+  false, and describes exactly what the opt-in request sends: nothing about the user or the
+  repository.
+- `validate_release.py` checks that both `SessionStart` matchers stay anchored. An unanchored
+  `compact` is how one event starts matching another.
+
 ## [1.1.15] — 2026-09-02
 
 ### Added

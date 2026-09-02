@@ -46,6 +46,19 @@ ADOPTED_FROM_VALUES = frozenset({"empty"})
 # Where an outside reviewer is worth having: the scope before it is approved, and the diff
 # before it is merged. Absent is a valid answer that the step has to state out loud.
 SECOND_OPINION_SLOTS = ("scope", "review")
+# An install stays on the version it was made with until someone updates it, so a stale
+# install is invisible unless something says so. Checking costs nothing locally; reaching
+# the network is a different promise, so that half is opt-in and off by default.
+PLUGIN_NAME = "truedev-workflow"
+UPDATE_CHECK_ENV = "TRUEDEV_UPDATE_CHECK"
+UPDATE_MANIFEST_URL = (
+    "https://raw.githubusercontent.com/itpartypattaya/truedev-codex-workflow/main/"
+    ".codex-plugin/plugin.json"
+)
+UPDATE_CHECK_INTERVAL_SECONDS = 86400
+UPDATE_COMMAND = (
+    "codex plugin marketplace upgrade truedev-workflow, then reinstall the plugin and restart Codex"
+)
 SLICE_STATUSES = frozenset({"pending", "completed"})
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -2222,11 +2235,167 @@ def _safe_context(states: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
     return " ".join(parts)
 
 
+def _version_tuple(value: Any) -> tuple[int, ...] | None:
+    """Compare versions as numbers. A version we cannot parse is not a newer one."""
+    if not isinstance(value, str) or not value:
+        return None
+    parts = value.split(".")
+    if len(parts) > 4:
+        return None
+    numbers: list[int] = []
+    for part in parts:
+        if not part.isdigit() or len(part) > 6:
+            return None
+        numbers.append(int(part))
+    return tuple(numbers)
+
+
+def _manifest_version(path: Path) -> str | None:
+    try:
+        if _is_link(path) or not path.is_file() or path.stat().st_size > 64 * 1024:
+            return None
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict) or manifest.get("name") != PLUGIN_NAME:
+        return None
+    version = manifest.get("version")
+    return version if isinstance(version, str) else None
+
+
+def _installed_manifest_version() -> str | None:
+    root = os.environ.get("PLUGIN_ROOT", "")
+    if not root or not os.path.isabs(root):
+        return None
+    return _manifest_version(Path(root) / ".codex-plugin" / "plugin.json")
+
+
+def _marketplace_manifest_version() -> str | None:
+    """The clone on disk. Only as fresh as the user's last marketplace update, so a hint."""
+    home = _home_boundary()
+    codex_home = os.environ.get("CODEX_HOME")
+    roots = []
+    if codex_home and os.path.isabs(codex_home):
+        roots.append(Path(codex_home))
+    if home is not None:
+        roots.append(home / ".codex")
+    for base in roots:
+        for pattern in (
+            "plugins/marketplaces/*/.codex-plugin/plugin.json",
+            ".tmp/marketplaces/*/.codex-plugin/plugin.json",
+        ):
+            try:
+                candidates = sorted(base.glob(pattern))[:20]
+            except OSError:
+                continue
+            for candidate in candidates:
+                version = _manifest_version(candidate)
+                if version is not None:
+                    return version
+    return None
+
+
+def _published_manifest_version() -> str | None:
+    """Opt-in only. Reaching the network is a promise this plugin does not make by default."""
+    if os.environ.get(UPDATE_CHECK_ENV) != "network":
+        return None
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(UPDATE_MANIFEST_URL, timeout=3) as response:
+            payload = response.read(64 * 1024)
+        manifest = json.loads(payload.decode("utf-8"))
+    except Exception:
+        # A version notice must never be able to break a session.
+        return None
+    if not isinstance(manifest, dict) or manifest.get("name") != PLUGIN_NAME:
+        return None
+    version = manifest.get("version")
+    return version if isinstance(version, str) else None
+
+
+def _update_stamp_path() -> Path | None:
+    home = _home_boundary()
+    if home is None:
+        return None
+    return home / ".cache" / "truedev-workflow" / "update-check"
+
+
+def _update_check_is_due(now: float) -> bool:
+    """Throttle to once a day. Losing the stamp costs one extra check, nothing more."""
+    stamp = _update_stamp_path()
+    if stamp is None:
+        return False
+    if _is_link(stamp):
+        # Writing through a link is how a stamp turns into a file clobber.
+        return False
+    try:
+        if stamp.is_file():
+            last = float(stamp.read_text(encoding="utf-8").strip() or 0)
+            if now - last < UPDATE_CHECK_INTERVAL_SECONDS:
+                return False
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(f"{int(now)}\n", encoding="utf-8")
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return True
+
+
+def available_update(now: float | None = None) -> tuple[str, str] | None:
+    """Return (installed, newer) when a newer version is published, else None."""
+    if os.environ.get(UPDATE_CHECK_ENV) == "off":
+        return None
+    installed = _installed_manifest_version()
+    current = _version_tuple(installed)
+    if installed is None or current is None:
+        return None
+    if not _update_check_is_due(time.time() if now is None else now):
+        return None
+    newest = installed
+    newest_tuple = current
+    for candidate in (_marketplace_manifest_version(), _published_manifest_version()):
+        parsed = _version_tuple(candidate)
+        if parsed is not None and parsed > newest_tuple:
+            newest, newest_tuple = candidate, parsed  # type: ignore[assignment]
+    return None if newest_tuple == current else (installed, newest)
+
+
+def hook_session_update_notice() -> int:
+    try:
+        found = available_update()
+    except Exception:
+        return 0
+    if found is None:
+        return 0
+    installed, newer = found
+    return _emit(
+        {
+            "systemMessage": (
+                f"TrueDev Workflow {newer} is available; {installed} is installed. "
+                f"Update: {UPDATE_COMMAND}."
+            ),
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": (
+                    f"PLUGIN UPDATE AVAILABLE: truedev-workflow {installed} is installed and "
+                    f"{newer} is published. If the user asks, the update path is: {UPDATE_COMMAND}. "
+                    "Do not run it yourself: updating a plugin runs new code on their machine, "
+                    "and that is their decision."
+                ),
+            },
+        }
+    )
+
+
 def hook_session_start() -> int:
     payload, root = _hook_context("session-start")
     if payload is None or root is None:
         return 0
-    if payload.get("source") != "compact":
+    source = payload.get("source")
+    if source in {"startup", "resume"}:
+        # No state is read here: a stale install is worth one line, not a gate.
+        return hook_session_update_notice()
+    if source != "compact":
         return 0
     try:
         states = _active_states(root)

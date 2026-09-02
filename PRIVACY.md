@@ -3,8 +3,28 @@
 Effective date: 2026-08-31
 
 TrueDev Workflow is a skills-only Codex plugin maintained by IT Party Pattaya. It does not include
-telemetry, analytics, advertising, an MCP server, or a bundled network client. The maintainer does
-not receive repository contents, prompts, workflow state, or hook payloads through the plugin.
+telemetry, analytics, advertising, or an MCP server. The maintainer does not receive repository
+contents, prompts, workflow state, or hook payloads through the plugin.
+
+It makes no network request unless you ask for one. The only request it can make at all is the
+update check described below, it is off by default, and it sends nothing about you or your
+repository.
+
+## The update check
+
+At the start of a session the plugin compares the installed version against the marketplace clone
+already on your disk. That comparison is entirely local: it reads manifest files under your Codex
+home and makes no request. When a newer version is found it prints one line and adds one sentence
+of context; it never updates anything itself, because that would run new code on your machine.
+
+Setting `TRUEDEV_UPDATE_CHECK=network` additionally fetches the published manifest over HTTPS from
+this project's own repository. The request carries no identifiers, no repository information, and
+no query parameters — it asks a public file what version it is. It is skipped unless you set that
+variable, it is attempted at most once a day, and a failure is silent so a version notice can never
+break a session. `TRUEDEV_UPDATE_CHECK=off` disables the check entirely, local half included.
+
+The once-a-day throttle is recorded as a single timestamp under your cache directory
+(`~/.cache/truedev-workflow/update-check`). Deleting it costs one extra check and nothing else.
 
 ## Data processed locally
 

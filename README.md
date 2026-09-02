@@ -212,6 +212,31 @@ A few details worth knowing; [`SECURITY.md`](SECURITY.md) has the full trust mod
 There is no telemetry and no bundled network client; [`PRIVACY.md`](PRIVACY.md) states exactly what
 is stored and where.
 
+## Updates
+
+An install stays on the version it was made with until someone updates it, so a stale install is
+invisible unless something says so. At the start of a session the plugin compares the installed
+version against the marketplace clone already on your disk — a local file read, no request — and
+prints one line if a newer one is there:
+
+```text
+TrueDev Workflow 1.1.16 is available; 1.1.13 is installed.
+```
+
+It never updates itself. Updating a plugin runs new code on your machine, and that is your
+decision, not a hook's.
+
+| Environment variable | Effect |
+| --- | --- |
+| unset (default) | Local comparison only, at most once a day |
+| `TRUEDEV_UPDATE_CHECK=network` | Also fetch the published manifest over HTTPS from this repository |
+| `TRUEDEV_UPDATE_CHECK=off` | No check at all |
+
+The network half is opt-in because reaching out is a different promise from reading a file. The
+request carries no identifiers and no repository information; it asks a public file what version it
+is. A failure is silent — a version notice must never be able to break a session. `PRIVACY.md` has
+the full detail.
+
 ## Git safety
 
 The workflow never pulls, stages everything, commits, pushes, opens or merges a PR, deletes a
