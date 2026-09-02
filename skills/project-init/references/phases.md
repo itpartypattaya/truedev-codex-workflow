@@ -3,6 +3,11 @@
 Read only the active phase. Each user phase ends by writing its durable artifact, presenting the
 decision summary, and opening the runner gate.
 
+An existing repository may already satisfy earlier phases. Run `detect` first: when it reports
+`suggested_entry_phase`, show the artifacts it found, let the user confirm, and start with
+`project-init start --from <PHASE> --user-confirmed`. Adopted phases are recorded as `pre_existing`
+with an explicit user receipt; they are never silently skipped.
+
 ## INPUT_VALIDATION
 
 Check the specification for:

@@ -126,12 +126,16 @@ def input_fingerprint(item: dict[str, Any], configuration: str) -> str:
     """Identify everything a run depends on, so --resume cannot keep a stale answer.
 
     Presence of an output said nothing about whether the prompt, the assertions, the
-    skill text, or the runner had changed since it was produced.
+    skill text, or the runner had changed since it was produced. The baseline run is told
+    not to read the skill, so hashing plugin sources into it would have discarded good
+    control runs on every documentation edit.
     """
     digest = hashlib.sha256()
     digest.update(json.dumps(item, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     digest.update(configuration.encode("utf-8"))
     digest.update(make_prompt(item, configuration).encode("utf-8"))
+    if configuration != "with_skill":
+        return digest.hexdigest()
     sources = [ROOT / "scripts" / "truedev_workflow.py"]
     for skill in sorted((ROOT / "skills").iterdir()):
         if skill.is_dir():
@@ -141,7 +145,7 @@ def input_fingerprint(item: dict[str, Any], configuration: str) -> str:
             digest.update(source.read_bytes())
         except OSError:
             digest.update(b"<unreadable>")
-        digest.update(source.name.encode("utf-8"))
+        digest.update(source.relative_to(ROOT).as_posix().encode("utf-8"))
     return digest.hexdigest()
 
 

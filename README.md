@@ -90,6 +90,49 @@ summary — the workflow name, the current step, its status, and the slice file.
 raw state never make it into that summary. If your Codex build does not emit a compact event, you
 can release the gate deliberately with `lifecycle release-compact --user-confirmed`.
 
+## Starting on a project that already exists
+
+Most repositories are not empty. Before anything else the skill asks the runner what is actually
+here:
+
+```text
+python3 <RUNNER> detect
+```
+
+That prints, as JSON, the detected stack and package manager, the build/lint/test/E2E commands it
+could find, which planning documents already exist, and the phase it suggests you enter at. It only
+reads files. It writes nothing and decides nothing.
+
+You then confirm the commands once, and they are written to `truedev.project.json` in the repository
+root:
+
+```text
+python3 <RUNNER> project-config init --build "npm run build" --test "npm test" --user-confirmed
+```
+
+From then on the skill runs your commands instead of guessing at npm or Vitest. A command recorded as
+`null` means that layer does not exist here, and the skill will say a check was skipped rather than
+invent one.
+
+If the project already has requirements, a PRD, or an architecture document, you can enter the
+process partway instead of regenerating them:
+
+```text
+python3 <RUNNER> project-init start --project "app" --spec "docs/spec.md" \
+  --from PLANNING --user-confirmed
+```
+
+The adopted phases are recorded as pre-existing with your explicit receipt — the workflow never
+claims it reviewed documents it did not write. And when it is time to pick the next slice, the runner
+answers rather than the model:
+
+```text
+python3 <RUNNER> project-init next-slice --plan-dir docs/plan
+```
+
+It returns the first pending slice whose dependencies are completed, or tells you exactly which
+slices are blocked and on what.
+
 ## Where state lives
 
 Everything active sits in `.truedev-workflow/` at the repository root, and it must be Git-ignored —

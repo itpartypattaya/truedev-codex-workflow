@@ -31,8 +31,11 @@ the user's repository.
 
 - **status or no explicit action:** run `lifecycle status`, report the table, and make no changes.
 - **start `<task>`:** initialize a lifecycle after the repository preflight.
-- **next:** select the first pending `docs/plan/slice-*.md` whose dependencies are completed, then
-  follow `start`; do not silently skip blocked dependencies.
+- **next:** ask the runner which slice is ready with
+  `project-init next-slice [--plan-dir <plan-dir>]`, then follow `start` with the file it names.
+  When it exits non-zero, report its `reason`, the `blocked` list, and any `unrecognized_status`
+  entries, and stop. Never choose a slice by listing the directory yourself, and never skip a
+  blocked dependency.
 - **approve `<STEP>`:** only after the user's latest message explicitly approves that exact gate,
   run `lifecycle approve --step <STEP> --user-confirmed`.
 - **ambiguous response at a user gate:** do not transition. Name the gate and ask the user to approve
@@ -60,8 +63,12 @@ state file manually.
 
 1. Run `<PYTHON> <RUNNER> --help` and stop if the required runner cannot start. A missing interpreter
    means hook enforcement is unavailable; do not create active state and imply gates are enforced.
-2. Read the nearest applicable `AGENTS.md`, selected slice, and repository command configuration.
-   Record only successful reads; follow the CONTEXT_CHECK evidence rules in `references/steps.md`.
+2. Read the nearest applicable `AGENTS.md`, the selected slice, and `truedev.project.json` for the
+   project's own build, lint, test, and E2E commands. If that file is absent, run `detect`, show the
+   user what was found, and write it with `project-config init ... --user-confirmed` only after the
+   user confirms those commands. Never write the file without asking, and never fall back to a
+   guessed stack. See `references/project-config.md`. Record only successful reads; follow the
+   CONTEXT_CHECK evidence rules in `references/steps.md`.
 3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
    instead of stashing, resetting, committing, or deleting it.
 4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
@@ -113,6 +120,9 @@ providers can execute code or escape repository paths:
 python3 <RUNNER> inspect git-status
 python3 <RUNNER> inspect git-diff [--staged] [--stat|--check|--name-only|--name-status]
 python3 <RUNNER> inspect file --path <repository-relative-non-sensitive-file>
+python3 <RUNNER> detect
+python3 <RUNNER> project-config show
+python3 <RUNNER> project-init next-slice [--plan-dir <plan-dir>]
 ```
 
 The file inspector accepts only regular UTF-8 files inside the Git root, rejects symlinks and
@@ -125,13 +135,16 @@ empty change set. Chaining, redirection, and writes remain blocked.
 `CONTEXT_CHECK → SCOPE → PLAN → COMPONENTS → IMPLEMENT → TEST → VERIFY → REVIEW → DOCUMENT → CLOSE`
 
 Read `<SKILL_DIR>/references/steps.md` only for the active step. Read
-`<SKILL_DIR>/references/state-schema.md` when diagnosing state validation or recovery. Keep the main
-context focused on the active slice.
+`<SKILL_DIR>/references/state-schema.md` when diagnosing state validation or recovery, and
+`<SKILL_DIR>/references/project-config.md` when adopting or reading the project's command
+configuration. Keep the main context focused on the active slice.
 
 ## Universal safety rules
 
-- Discover build, lint, format, test, and E2E commands from repository documentation and configuration.
-  Do not assume npm, Vitest, Playwright, React, Storybook, or any other stack.
+- Take build, lint, test, and E2E commands from `truedev.project.json` once the user has confirmed
+  them; until then, discover them from repository documentation and configuration and ask. A `null`
+  command means that layer does not exist in this project: say so instead of inventing one. Do not
+  assume npm, Vitest, Playwright, React, Storybook, or any other stack.
 - Treat existing and unrelated changes as user-owned. Stage only files owned by the current task.
 - Do not automatically commit, push, create a PR, merge, delete branches, or remove worktrees. Perform
   each external or destructive action only when the user has authorized that exact class of action.

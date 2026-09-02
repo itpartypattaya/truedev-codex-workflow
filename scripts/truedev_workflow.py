@@ -35,6 +35,13 @@ DETACHED_HEAD = "(detached)"
 GIT_UNAVAILABLE = "(git-unavailable)"
 BRANCH_SENTINELS = frozenset({DETACHED_HEAD, GIT_UNAVAILABLE})
 STATE_DIR = ".truedev-workflow"
+# Committed project description: how the repository builds, lints, and tests itself, and
+# where its plan lives. Confirmed by the user once; read by every slice afterwards.
+PROJECT_CONFIG_FILE = "truedev.project.json"
+DEFAULT_PLAN_DIR = "docs/plan"
+PROJECT_COMMANDS = ("build", "lint", "test", "e2e")
+TEST_SETUP_VALUES = frozenset({"declined:once", "declined:always"})
+SLICE_STATUSES = frozenset({"pending", "completed"})
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
 
@@ -79,6 +86,8 @@ SAFE_RUNNER_COMMAND = re.compile(
     r"(?P<runner>\"[^\"]*truedev_workflow\.py\"|'[^']*truedev_workflow\.py'|\S*truedev_workflow\.py)\s+"
     r"(?:(?:lifecycle|project-init)\s+(?:status|validate)|"
     r"project-init\s+validate-slices(?:\s+--plan-dir\s+" + _VALUE + r")?|"
+    r"project-init\s+next-slice(?:\s+--plan-dir\s+" + _VALUE + r")?|"
+    r"detect|project-config\s+show|"
     r"git-preflight(?:\s+(?:--require-clean|--expected-branch\s+" + _VALUE + r"))*|"
     r"inspect\s+(?:git-status|git-diff(?:\s+(?:--staged|--stat|--check|--name-only|--name-status))*|"
     r"file\s+--path\s+" + _VALUE + r")|"
@@ -282,11 +291,24 @@ def find_repo_root(start: Path | str) -> Path | None:
     result = _run_git(current, "rev-parse", "--show-toplevel")
     if result.returncode == 0 and result.stdout.strip():
         return Path(result.stdout.strip()).resolve()
+    # The standalone fallback exists for a checkout that lost its Git metadata. It must
+    # never reach the home directory or above: one stale state directory there would
+    # otherwise gate every tool call in every non-Git directory beneath it.
+    boundary = _home_boundary()
     for candidate in candidates:
+        if boundary is not None and (candidate == boundary or candidate in boundary.parents):
+            break
         state_dir = candidate / STATE_DIR
         if state_dir.is_dir() and not _is_link(state_dir):
             return candidate
     return None
+
+
+def _home_boundary() -> Path | None:
+    try:
+        return Path.home().resolve()
+    except (OSError, RuntimeError):
+        return None
 
 
 def state_path(root: Path, workflow: str) -> Path:
@@ -521,10 +543,17 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
             raise WorkflowError(f"later step {name} must remain pending")
         approved_at = item.get("approved_at")
         outcome = item.get("outcome")
-        if outcome not in {None, "not_applicable"}:
+        if outcome not in {None, "not_applicable", "pre_existing"}:
             raise WorkflowError(f"steps.{name}.outcome is invalid: {outcome!r}")
         if outcome == "not_applicable" and (name != "COMPONENTS" or status != "completed"):
             raise WorkflowError("only a completed COMPONENTS step may be not_applicable")
+        if outcome == "pre_existing":
+            # Only project-init phases can be adopted from artifacts already on disk, and
+            # only as an unbroken prefix: a phase cannot be adopted after a later one ran.
+            if workflow != "project-init" or status != "completed" or name == order[-1]:
+                raise WorkflowError(f"{name} cannot be recorded as pre-existing")
+            if any(steps[earlier].get("outcome") != "pre_existing" for earlier in order[:index]):
+                raise WorkflowError(f"pre-existing phase {name} must follow pre-existing phases only")
         if status == "completed" and expected_gate == "user" and outcome is None:
             _validate_timestamp(approved_at, f"steps.{name}.approved_at")
         elif approved_at is not None:
@@ -544,6 +573,7 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
     approval_receipts: list[tuple[str, str, int]] = []
     gate_receipts: list[tuple[str, int]] = []
     skip_receipts: list[tuple[str, int]] = []
+    adopt_receipts: list[tuple[str, int]] = []
     for index, entry in enumerate(history):
         if not isinstance(entry, dict):
             raise WorkflowError(f"history[{index}] must be an object")
@@ -565,6 +595,10 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
             if event_name != "COMPONENTS" or actor != "codex-not-applicable":
                 raise WorkflowError(f"history[{index}] is not a valid not-applicable receipt")
             skip_receipts.append((event_name, index))
+        if action == "adopt":
+            if workflow != "project-init" or event_name not in user_gates or actor != "user-explicit":
+                raise WorkflowError(f"history[{index}] is not a valid adoption receipt")
+            adopt_receipts.append((event_name, index))
 
     for name in user_gates:
         item = steps[name]
@@ -574,6 +608,14 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
             if any(receipt[0] == name for receipt in approval_receipts):
                 raise WorkflowError(f"not-applicable step {name} cannot have an approval receipt")
             continue
+        if item.get("outcome") == "pre_existing":
+            if len([receipt for receipt in adopt_receipts if receipt[0] == name]) != 1:
+                raise WorkflowError(f"pre-existing phase {name} lacks exactly one adoption receipt")
+            if any(receipt[0] == name for receipt in approval_receipts):
+                raise WorkflowError(f"pre-existing phase {name} cannot have an approval receipt")
+            continue
+        if any(receipt[0] == name for receipt in adopt_receipts):
+            raise WorkflowError(f"phase {name} has an adoption receipt without a pre-existing outcome")
         if any(receipt[0] == name for receipt in skip_receipts):
             raise WorkflowError(f"step {name} has a skip receipt without a not-applicable outcome")
         matching = [
@@ -864,6 +906,17 @@ def project_start(args: argparse.Namespace) -> int:
         raise WorkflowError(f"an active project-init workflow already exists: {path}")
     require_state_ignored(root, "project-init")
     now = utc_now()
+    entry = getattr(args, "from_phase", None) or PROJECT_PHASES[0]
+    if entry not in PROJECT_PHASES[:-1]:
+        raise WorkflowError(
+            "--from must name a phase before FINALIZE: " + ", ".join(PROJECT_PHASES[:-1])
+        )
+    if entry != PROJECT_PHASES[0] and not getattr(args, "user_confirmed", False):
+        raise WorkflowError(
+            "entering at a later phase skips gates whose artifacts already exist; it requires "
+            "--user-confirmed after the user has seen which phases are being adopted"
+        )
+    steps = _new_steps(PROJECT_PHASES, PROJECT_USER_GATES)
     state: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "workflow": "project-init",
@@ -872,13 +925,22 @@ def project_start(args: argparse.Namespace) -> int:
         "spec": args.spec,
         "started_at": now,
         "updated_at": now,
-        "current_phase": PROJECT_PHASES[0],
-        "steps": _new_steps(PROJECT_PHASES, PROJECT_USER_GATES),
+        "current_phase": entry,
+        "steps": steps,
         "history": [],
     }
-    _history(state, "start", PROJECT_PHASES[0], "codex")
+    entry_index = PROJECT_PHASES.index(entry)
+    for phase in PROJECT_PHASES[:entry_index]:
+        # Adopted, not approved: the artifact was there before this run, so no gate opened
+        # and no approval exists. The receipt records the user decision to enter here.
+        steps[phase]["status"] = "completed"
+        steps[phase]["outcome"] = "pre_existing"
+        _history(state, "adopt", phase, "user-explicit", at=now)
+    steps[entry]["status"] = "in_progress"
+    _history(state, "start", entry, "codex")
     save_state(root, "project-init", state)
-    print(f"Started project-init for {args.project!r}.")
+    adopted = ", ".join(PROJECT_PHASES[:entry_index]) or "none"
+    print(f"Started project-init for {args.project!r} at {entry} (adopted as pre-existing: {adopted}).")
     return 0
 
 
@@ -1060,15 +1122,29 @@ def release_compact_gate(*, user_confirmed: bool) -> int:
     return 0
 
 
-def validate_slices(args: argparse.Namespace) -> int:
-    root = _repo_root_or_error()
-    plan_dir = (root / args.plan_dir).resolve()
+def _configured_plan_dir(root: Path, plan_dir_arg: str | None) -> str:
+    """Prefer the explicit flag, then the committed project file, then the default."""
+    if plan_dir_arg is not None:
+        return plan_dir_arg
+    config = load_project_config(root)
+    if config is not None and isinstance(config.get("plan_dir"), str) and config["plan_dir"]:
+        return config["plan_dir"]
+    return DEFAULT_PLAN_DIR
+
+
+def _resolve_plan_dir(root: Path, plan_dir_arg: str) -> Path:
+    plan_dir = (root / plan_dir_arg).resolve()
     try:
         plan_dir.relative_to(root.resolve())
     except ValueError as exc:
         raise WorkflowError("plan directory must stay inside the repository") from exc
     if not plan_dir.is_dir():
         raise WorkflowError(f"plan directory does not exist: {plan_dir}")
+    return plan_dir
+
+
+def _scan_slices(root: Path, plan_dir: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Parse every slice file once; validation and selection both read this."""
     records: dict[str, dict[str, Any]] = {}
     problems: list[str] = []
     for path in sorted(plan_dir.glob("slice-*.md")):
@@ -1094,7 +1170,14 @@ def validate_slices(args: argparse.Namespace) -> int:
         else:
             raw = dependency_match.group(1).strip()
             dependencies = [] if raw.lower() == "none" else [item.strip() for item in raw.split(",") if item.strip()]
-        records[slice_id] = {"file": path.name, "dependencies": dependencies}
+        status_match = re.search(r"(?mi)^Status:\s*(.+?)\s*$", text)
+        status = status_match.group(1).strip().lower() if status_match else "missing"
+        records[slice_id] = {
+            "file": path.name,
+            "path": path.relative_to(root.resolve()).as_posix(),
+            "dependencies": dependencies,
+            "status": status,
+        }
     if not records:
         problems.append("no valid slice files found")
     for slice_id, record in records.items():
@@ -1124,9 +1207,332 @@ def validate_slices(args: argparse.Namespace) -> int:
 
     for slice_id in records:
         visit(slice_id, [slice_id])
-    result = {"ok": not problems, "slices": records, "problems": sorted(set(problems))}
+    return records, sorted(set(problems))
+
+
+def validate_slices(args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    plan_dir_arg = _configured_plan_dir(root, args.plan_dir)
+    records, problems = _scan_slices(root, _resolve_plan_dir(root, plan_dir_arg))
+    result = {"ok": not problems, "plan_dir": plan_dir_arg, "slices": records, "problems": problems}
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if not problems else 2
+
+
+def next_slice(args: argparse.Namespace) -> int:
+    """Pick the slice a new lifecycle should start on, and say why the others cannot.
+
+    The skill used to describe this selection in prose and leave the reading to the
+    model. A marker it misread would return the same slice forever, or skip a blocked
+    one silently; the runner reads the same headers the template writes.
+    """
+    root = _repo_root_or_error()
+    plan_dir_arg = _configured_plan_dir(root, args.plan_dir)
+    records, problems = _scan_slices(root, _resolve_plan_dir(root, plan_dir_arg))
+    if problems:
+        print(json.dumps(
+            {"next": None, "plan_dir": plan_dir_arg,
+             "reason": "plan has structural problems; fix them first",
+             "problems": problems}, ensure_ascii=False, indent=2))
+        return 2
+    completed = {sid for sid, rec in records.items() if rec["status"] == "completed"}
+    unrecognized = sorted(sid for sid, rec in records.items() if rec["status"] not in SLICE_STATUSES)
+    blocked: list[dict[str, Any]] = []
+    chosen: dict[str, Any] | None = None
+    for sid in sorted(records):
+        rec = records[sid]
+        if rec["status"] != "pending":
+            continue
+        unmet = [dep for dep in rec["dependencies"] if dep not in completed]
+        if unmet:
+            blocked.append({"id": sid, "file": rec["file"], "waiting_on": unmet})
+        elif chosen is None:
+            chosen = {"id": sid, "file": rec["file"], "path": rec["path"]}
+    if chosen is not None:
+        reason = "first pending slice whose dependencies are all completed"
+    elif blocked:
+        reason = "every pending slice waits on an incomplete dependency"
+    elif unrecognized:
+        reason = "no pending slice; some slices carry a status the runner does not recognize"
+    else:
+        reason = "every slice is completed"
+    print(json.dumps(
+        {"next": chosen, "plan_dir": plan_dir_arg, "reason": reason, "blocked": blocked,
+         "unrecognized_status": [{"id": sid, "status": records[sid]["status"]} for sid in unrecognized],
+         "completed": sorted(completed)},
+        ensure_ascii=False, indent=2))
+    return 0 if chosen is not None else 2
+
+
+def _read_text_if_file(path: Path, limit: int = 256 * 1024) -> str | None:
+    try:
+        if not path.is_file() or _is_link(path) or path.stat().st_size > limit:
+            return None
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _mentions(path: Path, *needles: str) -> bool:
+    text = _read_text_if_file(path)
+    if text is None:
+        return False
+    lowered = text.lower()
+    return any(needle in lowered for needle in needles)
+
+
+def _makefile_target(root: Path, name: str) -> str | None:
+    text = _read_text_if_file(root / "Makefile")
+    if text is None:
+        return None
+    return f"make {name}" if re.search(rf"(?m)^{re.escape(name)}\s*:", text) else None
+
+
+def detect_project(root: Path) -> dict[str, Any]:
+    """Describe how the repository builds, lints, and tests itself, without guessing.
+
+    A command is reported only when the script that runs it exists. An empty answer is
+    a valid answer; this must never be the thing that stops a run.
+    """
+    stack = "unknown"
+    manager: str | None = None
+    commands: dict[str, str | None] = {name: None for name in PROJECT_COMMANDS}
+    has_ui = False
+    domain: str | None = None
+    integration: str | None = None
+
+    package_json = _read_text_if_file(root / "package.json")
+    if package_json is not None:
+        stack = "node"
+        try:
+            package = json.loads(package_json)
+        except json.JSONDecodeError:
+            package = {}
+        scripts = package.get("scripts") if isinstance(package, dict) else None
+        scripts = scripts if isinstance(scripts, dict) else {}
+        dependencies: set[str] = set()
+        if isinstance(package, dict):
+            for key in ("dependencies", "devDependencies"):
+                block = package.get(key)
+                if isinstance(block, dict):
+                    dependencies.update(str(name) for name in block)
+        if (root / "pnpm-lock.yaml").is_file():
+            manager = "pnpm"
+        elif (root / "yarn.lock").is_file():
+            manager = "yarn"
+        elif (root / "bun.lockb").is_file() or (root / "bun.lock").is_file():
+            manager = "bun"
+        else:
+            manager = "npm"
+
+        def first(*names: str) -> str | None:
+            for name in names:
+                if name in scripts:
+                    return f"{manager} run {name}"
+            return None
+
+        commands["build"] = first("build", "compile")
+        commands["lint"] = first("lint", "check", "biome", "eslint")
+        commands["test"] = first("test", "unit", "test:unit")
+        commands["e2e"] = first("test:e2e", "e2e", "playwright", "cypress")
+        has_ui = bool(dependencies & {"react", "vue", "svelte", "next", "nuxt", "@angular/core", "solid-js"})
+        if dependencies & {"telegraf", "grammy", "node-telegram-bot-api", "telegram"}:
+            domain, integration = "telegram-bot", "gramjs"
+    elif any((root / name).is_file() for name in ("pyproject.toml", "setup.cfg", "tox.ini", "requirements.txt")):
+        stack = "python"
+        config_files = [root / name for name in ("pyproject.toml", "setup.cfg", "tox.ini", "requirements.txt")]
+        if any(_mentions(path, "pytest") for path in config_files) or any(
+            (root / name).is_file() for name in ("conftest.py", "pytest.ini", "tests/conftest.py")
+        ):
+            commands["test"] = "pytest"
+        if _mentions(root / "pyproject.toml", "ruff"):
+            commands["lint"] = "ruff check ."
+        elif any(_mentions(path, "flake8") for path in config_files):
+            commands["lint"] = "flake8"
+        if any(_mentions(path, "aiogram", "python-telegram-bot", "pyrogram", "telethon") for path in config_files):
+            domain, integration = "telegram-bot", "telethon"
+    elif (root / "go.mod").is_file():
+        stack = "go"
+        commands.update({"build": "go build ./...", "test": "go test ./...", "lint": "go vet ./..."})
+    elif (root / "Cargo.toml").is_file():
+        stack = "rust"
+        commands.update({"build": "cargo build", "test": "cargo test", "lint": "cargo clippy"})
+    elif (root / "Makefile").is_file():
+        stack = "make"
+
+    # A Makefile fills whatever the stack above could not name.
+    for name in PROJECT_COMMANDS:
+        if commands[name] is None:
+            commands[name] = _makefile_target(root, name)
+
+    test_setup: dict[str, Any] | None = None
+    if commands["test"] is None:
+        suggestions = {
+            "node": ("vitest", f"{manager} add -D vitest" if manager != "npm" else "npm install -D vitest"),
+            "python": ("pytest", "pip install pytest"),
+            "go": ("go test", None),
+            "rust": ("cargo test", None),
+        }
+        if stack in suggestions:
+            runner, install = suggestions[stack]
+            test_setup = {
+                "runner": runner,
+                "install": install,
+                "e2e": "playwright" if has_ui else None,
+                "integration": integration,
+            }
+
+    docs = {
+        "requirements": (root / "docs" / "REQUIREMENTS.md").is_file(),
+        "prd": (root / "docs" / "prd.md").is_file(),
+        "architecture": (root / "docs" / "architecture.md").is_file(),
+        "design_system": (root / "docs" / "design-system.md").is_file(),
+    }
+    has_phases = any((root / "docs" / "plan").glob("phase-*.md")) if (root / "docs" / "plan").is_dir() else False
+    has_source = stack != "unknown" or any(
+        (root / name).is_dir() for name in ("src", "app", "lib", "pkg", "cmd", "internal", "server", "client", "packages", "services")
+    )
+    if has_phases:
+        entry = "DECOMPOSITION"
+    elif docs["architecture"]:
+        entry = "PLANNING"
+    elif docs["prd"]:
+        entry = "ARCHITECTURE"
+    elif docs["requirements"]:
+        entry = "PRD"
+    else:
+        entry = "INPUT_VALIDATION"
+
+    native_plan = (root / "docs" / "plan").is_dir() and any((root / "docs" / "plan").glob("slice-*.md"))
+    candidates: list[str] = []
+    if not native_plan:
+        seen: set[str] = set()
+        for pattern in ("*.md", "docs/*.md", "docs/plan/*.md", "docs/tasks/*.md", "specs/*.md"):
+            for path in sorted(root.glob(pattern)):
+                if not path.is_file() or _is_link(path):
+                    continue
+                name = path.name.lower()
+                if name in {"readme.md", "changelog.md", "license.md"}:
+                    continue
+                looks_like_plan = (
+                    name in {"plan.md", "roadmap.md", "todo.md", "backlog.md", "milestones.md"}
+                    or any(token in name for token in ("plan", "roadmap", "slice"))
+                    or path.parent.name in {"plan", "tasks"}
+                )
+                relative = path.relative_to(root).as_posix()
+                if looks_like_plan and relative.lower() not in seen:
+                    seen.add(relative.lower())
+                    candidates.append(relative)
+                if len(candidates) >= 12:
+                    break
+            if len(candidates) >= 12:
+                break
+
+    return {
+        "stack": stack,
+        "package_manager": manager,
+        "commands": commands,
+        "has_ui": has_ui,
+        "domain": domain,
+        "test_setup": test_setup,
+        "docs": docs,
+        "has_source_code": has_source,
+        "has_phases": has_phases,
+        "suggested_entry_phase": entry,
+        "plan": {"native": native_plan, "candidates": candidates},
+        "project_config": (root / PROJECT_CONFIG_FILE).is_file(),
+    }
+
+
+def detect_command(_args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    print(json.dumps(detect_project(root), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _project_config_path(root: Path) -> Path:
+    return root / PROJECT_CONFIG_FILE
+
+
+def load_project_config(root: Path) -> dict[str, Any] | None:
+    path = _project_config_path(root)
+    if _is_link(path):
+        raise WorkflowError(f"{PROJECT_CONFIG_FILE} must be a regular file")
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise WorkflowError(f"cannot read {PROJECT_CONFIG_FILE}: {exc}") from exc
+    validate_project_config(value)
+    return value
+
+
+def validate_project_config(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise WorkflowError(f"{PROJECT_CONFIG_FILE} must contain a JSON object")
+    commands = value.get("commands")
+    if not isinstance(commands, dict) or set(commands) != set(PROJECT_COMMANDS):
+        raise WorkflowError(f"{PROJECT_CONFIG_FILE} commands must contain exactly: " + ", ".join(PROJECT_COMMANDS))
+    for name, command in commands.items():
+        if command is not None:
+            _validate_text(command, f"commands.{name}", maximum=500)
+            if SHELL_CONTROL.search(command):
+                raise WorkflowError(f"commands.{name} must be a single command without shell control operators")
+    plan_dir = value.get("plan_dir")
+    if plan_dir is not None:
+        text = _validate_text(plan_dir, "plan_dir", maximum=255).replace(chr(92), "/")
+        parts = PurePosixPath(text).parts
+        if PurePosixPath(text).is_absolute() or not parts or any(
+            part in {"", ".", ".."} or SAFE_PATH_COMPONENT.fullmatch(part) is None for part in parts
+        ):
+            raise WorkflowError("plan_dir must be a repository-relative path with safe components")
+    setup = value.get("test_setup")
+    if setup is not None:
+        _validate_text(setup, "test_setup", maximum=100)
+        if setup not in TEST_SETUP_VALUES and not setup.partition("accepted:")[2].strip():
+            raise WorkflowError('test_setup must be "accepted:<runner>", "declined:once", or "declined:always"')
+    if value.get("adopted_at") is not None:
+        _validate_timestamp(value["adopted_at"], "adopted_at")
+
+
+def project_config_show(_args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    value = load_project_config(root)
+    if value is None:
+        print(json.dumps({"present": False, "path": PROJECT_CONFIG_FILE}, ensure_ascii=False, indent=2))
+        return 2
+    print(json.dumps({"present": True, "path": PROJECT_CONFIG_FILE, **value}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def project_config_init(args: argparse.Namespace) -> int:
+    """Write the confirmed project description. Detection proposes; the user decides."""
+    if not args.user_confirmed:
+        raise WorkflowError(
+            "writing the project description requires --user-confirmed after the user has seen "
+            "the detected commands and corrected them"
+        )
+    root = _repo_root_or_error()
+    path = _project_config_path(root)
+    if _is_link(path):
+        raise WorkflowError(f"{PROJECT_CONFIG_FILE} must be a regular file")
+    if path.exists() and not args.overwrite:
+        raise WorkflowError(f"{PROJECT_CONFIG_FILE} already exists; pass --overwrite to replace it")
+    value: dict[str, Any] = {
+        "commands": {name: getattr(args, name) for name in PROJECT_COMMANDS},
+        "plan_dir": args.plan_dir,
+        "test_setup": args.test_setup,
+        "adopted_at": utc_now(),
+    }
+    validate_project_config(value)
+    _atomic_write(path, value)
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        pass
+    print(f"Wrote {PROJECT_CONFIG_FILE}; commit it with the project so every slice reads the same answer.")
+    return 0
 
 
 def print_status(workflow: str) -> int:
@@ -1800,6 +2206,8 @@ def build_parser() -> argparse.ArgumentParser:
     project_start_parser = project_sub.add_parser("start")
     project_start_parser.add_argument("--project", required=True)
     project_start_parser.add_argument("--spec", required=True)
+    project_start_parser.add_argument("--from", dest="from_phase", choices=PROJECT_PHASES[:-1])
+    project_start_parser.add_argument("--user-confirmed", action="store_true")
     project_start_parser.set_defaults(func=project_start)
     for action in ("gate", "finish", "approve"):
         item = project_sub.add_parser(action)
@@ -1820,8 +2228,24 @@ def build_parser() -> argparse.ArgumentParser:
         func=lambda args: abandon_workflow("project-init", user_confirmed=args.user_confirmed)
     )
     slice_validation = project_sub.add_parser("validate-slices")
-    slice_validation.add_argument("--plan-dir", default="docs/plan")
+    slice_validation.add_argument("--plan-dir")
     slice_validation.set_defaults(func=validate_slices)
+    slice_next = project_sub.add_parser("next-slice")
+    slice_next.add_argument("--plan-dir")
+    slice_next.set_defaults(func=next_slice)
+
+    sub.add_parser("detect").set_defaults(func=detect_command)
+    config = sub.add_parser("project-config")
+    config_sub = config.add_subparsers(dest="config_command", required=True)
+    config_sub.add_parser("show").set_defaults(func=project_config_show)
+    config_init = config_sub.add_parser("init")
+    for name in PROJECT_COMMANDS:
+        config_init.add_argument(f"--{name}")
+    config_init.add_argument("--plan-dir")
+    config_init.add_argument("--test-setup")
+    config_init.add_argument("--overwrite", action="store_true")
+    config_init.add_argument("--user-confirmed", action="store_true")
+    config_init.set_defaults(func=project_config_init)
 
     preflight = sub.add_parser("git-preflight")
     preflight.add_argument("--require-clean", action="store_true")

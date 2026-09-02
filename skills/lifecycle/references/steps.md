@@ -10,9 +10,12 @@ the evidence presented to the user.
    instruction/config file and summarize at least one material directive in past tense. If a required
    read fails, stop instead of inferring commands from conventions or the request.
 2. Run the bundled `git-preflight --require-clean` before branch or worktree changes.
-3. Confirm the slice dependencies are completed and the task does not overlap unrelated work.
-4. Record any unavailable validation layers. Do not treat them as passed.
-5. Finish `CONTEXT_CHECK` through the runner.
+3. Load the project's commands with `project-config show`. If it exits 2, run `detect`, present the
+   detected stack and commands, and write them with `project-config init ... --user-confirmed` only
+   after the user confirms. A `null` command marks an absent layer, not a command to invent.
+4. Confirm the slice dependencies are completed and the task does not overlap unrelated work.
+5. Record any unavailable validation layers. Do not treat them as passed.
+6. Finish `CONTEXT_CHECK` through the runner.
 
 ## SCOPE — user gate
 
@@ -63,12 +66,17 @@ Open the COMPONENTS gate and stop.
 1. Add or update tests in the project's existing frameworks.
 2. Cover the business logic and regressions introduced by the slice. Add integration or E2E coverage
    only where that layer exists and materially protects the behavior.
-3. Run the narrow tests first, then the repository's broader relevant suite.
+3. Run the narrow tests first, then the repository's broader relevant suite, using `commands.test`
+   and `commands.e2e` from `truedev.project.json`. A `null` command means that layer was skipped;
+   say so rather than substituting another command. When `test_setup` records an accepted runner
+   and no test command exists yet, setting that runner up is part of this slice.
 4. Record commands, outcomes, and unavailable layers. Finish TEST when evidence is reproducible.
 
 ## VERIFY — user gate
 
-1. Run discovered build, lint, formatting, type, migration, or package checks relevant to the task.
+1. Run the `commands.build` and `commands.lint` entries from `truedev.project.json`, plus any
+   formatting, type, migration, or packaging checks relevant to the task. A `null` entry means that
+   check does not exist here; report it as not run instead of guessing a command.
 2. Summarize automated TEST evidence and provide a short user-facing manual verification checklist.
 3. State exactly what was not executed and why.
 4. Open the VERIFY gate and wait for the user's manual-test result or explicit acceptance of the
