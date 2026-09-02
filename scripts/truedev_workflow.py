@@ -43,6 +43,9 @@ PROJECT_COMMANDS = ("build", "lint", "test", "e2e")
 TEST_SETUP_VALUES = frozenset({"declined:once", "declined:always"})
 SETUP_FIELDS = ("test_setup", "e2e_setup", "integration_test")
 ADOPTED_FROM_VALUES = frozenset({"empty"})
+# Where an outside reviewer is worth having: the scope before it is approved, and the diff
+# before it is merged. Absent is a valid answer that the step has to state out loud.
+SECOND_OPINION_SLOTS = ("scope", "review")
 SLICE_STATUSES = frozenset({"pending", "completed"})
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -1537,6 +1540,21 @@ def validate_project_config(value: Any) -> None:
             raise WorkflowError(
                 f'{field} must be "accepted:<tool>", "declined:once", or "declined:always"'
             )
+    second_opinion = value.get("second_opinion")
+    if second_opinion is not None:
+        if not isinstance(second_opinion, dict) or set(second_opinion) != set(SECOND_OPINION_SLOTS):
+            raise WorkflowError(
+                f"{PROJECT_CONFIG_FILE} second_opinion must contain exactly: "
+                + ", ".join(SECOND_OPINION_SLOTS)
+            )
+        for slot, tool in second_opinion.items():
+            if tool is None:
+                continue
+            _validate_text(tool, f"second_opinion.{slot}", maximum=200)
+            if SHELL_CONTROL.search(tool):
+                raise WorkflowError(
+                    f"second_opinion.{slot} must name one reviewer without shell control operators"
+                )
     adopted_from = value.get("adopted_from")
     if adopted_from is not None:
         _validate_text(adopted_from, "adopted_from", maximum=32)
@@ -1576,6 +1594,10 @@ def project_config_init(args: argparse.Namespace) -> int:
         "e2e_setup": args.e2e_setup,
         "integration_test": args.integration_test,
         "adopted_from": args.adopted_from,
+        "second_opinion": {
+            "scope": args.second_opinion_scope,
+            "review": args.second_opinion_review,
+        },
         "adopted_at": utc_now(),
     }
     validate_project_config(value)
@@ -2342,6 +2364,8 @@ def build_parser() -> argparse.ArgumentParser:
     config_init.add_argument("--e2e-setup")
     config_init.add_argument("--integration-test")
     config_init.add_argument("--adopted-from", choices=sorted(ADOPTED_FROM_VALUES))
+    config_init.add_argument("--second-opinion-scope")
+    config_init.add_argument("--second-opinion-review")
     config_init.add_argument("--overwrite", action="store_true")
     config_init.add_argument("--user-confirmed", action="store_true")
     config_init.set_defaults(func=project_config_init)

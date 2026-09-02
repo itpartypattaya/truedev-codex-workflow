@@ -29,9 +29,15 @@ the evidence presented to the user.
 1. Read the slice and relevant contracts or specifications.
 2. Present the intended outcome, acceptance criteria, out-of-scope items, risks, and unresolved choices.
 3. Separate confirmed requirements from assumptions and recommendations.
-4. If current or niche facts matter, verify them from primary sources and preserve citations in the
+4. Second opinion, before the gate opens: if `second_opinion.scope` in `truedev.project.json` names
+   a reviewer, consult it now and present its findings as their own block beside your analysis,
+   attributed. Run it before `gate`, never after — an open gate blocks subagent launches, so a
+   review deferred to that point cannot happen. If the reviewer is unavailable or `null`, write
+   `second opinion: not configured` in the evidence and continue. Never block on it, and never let
+   its absence pass unmentioned.
+5. If current or niche facts matter, verify them from primary sources and preserve citations in the
    durable artifact.
-5. Open the SCOPE gate and stop. Approval must name or clearly refer to SCOPE.
+6. Open the SCOPE gate and stop. Approval must name or clearly refer to SCOPE.
 
 ## PLAN
 
@@ -104,8 +110,14 @@ Open the COMPONENTS gate and stop.
 2. Scan for secrets, transient state, generated noise, and unrelated files.
 3. Review correctness, authorization, data integrity, concurrency, error handling, observability,
    performance, compatibility, and test gaps.
-4. Report findings as P0/P1/P2 with exact files and evidence. Do not hide findings because tests pass.
-5. Map every approved acceptance criterion before opening the gate:
+4. Second opinion, before the gate opens: if `second_opinion.review` in `truedev.project.json`
+   names a reviewer, run it over the same diff and present its findings as their own attributed
+   block. Run it before `gate`, never after — an open gate blocks subagent launches, so a review
+   deferred to that point cannot happen. If the reviewer is unavailable or `null`, write
+   `second opinion: not configured` in the evidence and continue.
+5. Report findings as P0/P1/P2 with exact files and evidence, saying which review each came from.
+   Do not hide findings because tests pass.
+6. Map every approved acceptance criterion before opening the gate:
 
    | Criterion | Evidence | Gap |
    | --- | --- | --- |
@@ -113,7 +125,7 @@ Open the COMPONENTS gate and stop.
 
    Use `none` only when current evidence directly proves the criterion. Turn unresolved gaps into
    findings or explicit limitations; do not treat the matrix itself as evidence.
-6. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
+7. Open the REVIEW gate. Apply fixes only after the user selects or approves them; then rerun relevant
    verification before approval transition.
 
 ## DOCUMENT

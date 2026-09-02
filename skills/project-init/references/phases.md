@@ -3,6 +3,12 @@
 Read only the active phase. Each user phase ends by writing its durable artifact, presenting the
 decision summary, and opening the runner gate.
 
+Ask once, at `INPUT_VALIDATION`, whether an outside reviewer should critique each phase artifact:
+name the skill or subagent, or record that there is none. Keep the answer in
+`docs/REQUIREMENTS.md` under `Second opinion:` and use it for every later phase without asking
+again. When there is none, each phase says `second opinion: not configured` rather than leaving
+the reader to assume one was taken.
+
 An existing repository may already satisfy earlier phases. Run `detect` first: when it reports
 `suggested_entry_phase`, show the artifacts it found, let the user confirm, and start with
 `project-init start --from <PHASE> --user-confirmed`. Adopted phases are recorded as `pre_existing`

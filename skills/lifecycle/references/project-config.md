@@ -17,6 +17,7 @@ change.
   "e2e_setup": "declined:once",
   "integration_test": null,
   "adopted_from": null,
+  "second_opinion": {"scope": "toxic-opinion", "review": null},
   "adopted_at": "2026-09-02T05:00:00Z"
 }
 ```
@@ -34,6 +35,9 @@ change.
   offer has not been made yet — silence never sets a decline.
 - `adopted_from` — `"empty"` when the repository had no manifest at adoption. The first step that
   finds one runs the dialogue again instead of reporting "not configured" forever.
+- `second_opinion` — optional object with exactly `scope` and `review`. Each names one reviewer to
+  consult before that gate opens — another installed skill, or a subagent brief. `null` means the
+  layer is not configured, and the step must say so in its evidence rather than omitting it.
 - `adopted_at` — ISO-8601 UTC timestamp of when the user confirmed this file.
 
 ## Rules
@@ -51,6 +55,9 @@ change.
 - `project-config show` exits 2 when the file is absent. That is the signal to run `detect` and ask,
   not to proceed on assumptions.
 - Ask the way `The adoption dialogue` below says, in that order. Each layer is its own answer.
+- A `null` reviewer is a fact to report, not a step to skip quietly. The gate evidence says
+  `second opinion: not configured`, so the reader knows an outside view was never taken rather than
+  taken and agreed.
 - `detect` and `project-config show` are read-only and stay available while a gate is open;
   `project-config init` writes and is blocked there.
 - Write the file after the clean-tree preflight, never before it. It is a task-owned change, and

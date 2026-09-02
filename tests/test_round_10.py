@@ -298,6 +298,84 @@ class AdoptionDocumentationTests(unittest.TestCase):
         self.assertIn("credentials in the environment", test_section)
 
 
+class SecondOpinionTests(WorkflowFixture):
+    def test_a_reviewer_is_recorded_per_slot(self) -> None:
+        code, _, error = self.cli(
+            "project-config", "init",
+            "--second-opinion-scope", "toxic-opinion",
+            "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        value = workflow.load_project_config(self.root)
+        self.assertEqual(value["second_opinion"]["scope"], "toxic-opinion")
+        self.assertIsNone(value["second_opinion"]["review"], "an unset slot is not configured")
+
+    def test_the_object_shape_is_fixed(self) -> None:
+        write(
+            self.root / workflow.PROJECT_CONFIG_FILE,
+            '{"commands": {"build": null, "lint": null, "test": null, "e2e": null},'
+            ' "second_opinion": {"scope": "x"}}\n',
+        )
+        with self.assertRaises(workflow.WorkflowError) as raised:
+            workflow.load_project_config(self.root)
+        self.assertIn("second_opinion must contain exactly", str(raised.exception))
+
+    def test_a_reviewer_cannot_smuggle_a_shell_operator(self) -> None:
+        code, _, error = self.cli(
+            "project-config", "init",
+            "--second-opinion-review", "reviewer && rm -rf /",
+            "--user-confirmed",
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("shell control", error)
+
+    def test_an_absent_layer_is_still_a_valid_config(self) -> None:
+        code, _, error = self.cli("project-config", "init", "--user-confirmed")
+        self.assertEqual(code, 0, error)
+        value = workflow.load_project_config(self.root)
+        self.assertEqual(
+            value["second_opinion"], {"scope": None, "review": None}
+        )
+
+
+class SecondOpinionDocumentationTests(unittest.TestCase):
+    def read(self, *parts: str) -> str:
+        return (ROOT.joinpath(*parts)).read_text(encoding="utf-8")
+
+    def test_both_gates_run_the_reviewer_before_the_gate_opens(self) -> None:
+        steps = self.read("skills", "lifecycle", "references", "steps.md")
+        scope = steps.split("## SCOPE", 1)[1].split("## PLAN", 1)[0]
+        review = steps.split("## REVIEW", 1)[1].split("## DOCUMENT", 1)[0]
+        for name, section in (("SCOPE", scope), ("REVIEW", review)):
+            with self.subTest(section=name):
+                self.assertIn("second_opinion", section)
+                self.assertIn("not configured", section)
+                self.assertIn("before `gate`", section)
+
+    def test_an_unconfigured_layer_must_be_reported(self) -> None:
+        config = self.read("skills", "lifecycle", "references", "project-config.md")
+        self.assertIn("second opinion: not configured", config)
+        self.assertIn("never taken rather than", config)
+
+    def test_project_init_asks_once(self) -> None:
+        phases = self.read("skills", "project-init", "references", "phases.md")
+        intro = phases.split("## INPUT_VALIDATION", 1)[0]
+        self.assertIn("Second opinion:", intro)
+        self.assertIn("without asking\nagain", intro)
+
+    def test_the_eval_suite_covers_the_absent_layer(self) -> None:
+        import json
+
+        data = json.loads(self.read("evals", "plugin", "evals.json"))
+        case = [
+            item for item in data["evals"] if item["id"] == "positive-lifecycle-second-opinion"
+        ]
+        self.assertEqual(len(case), 1)
+        joined = " ".join(case[0]["assertions"]).lower()
+        self.assertIn("second opinion", joined)
+        self.assertIn("not configured", joined)
+
+
 class CommandDocumentationTests(unittest.TestCase):
     def test_every_documented_command_exists_in_the_runner(self) -> None:
         text = (ROOT / "skills" / "lifecycle" / "SKILL.md").read_text(encoding="utf-8")

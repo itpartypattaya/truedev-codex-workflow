@@ -186,7 +186,9 @@ configuration. Keep the main context focused on the active slice.
   compatibility contracts.
 - Distinguish static, unit, integration, E2E, staging, and live evidence. Never imply an unavailable
   layer passed.
-- Missing optional tools reduce evidence; they do not justify invented results or weakened gates.
+- Missing optional tools reduce evidence; they do not justify invented results or weakened gates. A
+  layer that is not configured — an external reviewer, an E2E suite — is reported as absent in the
+  evidence, never omitted from it.
 - Use subagents only when host policy and the user's request permit them. The workflow must work with
   one agent.
 
