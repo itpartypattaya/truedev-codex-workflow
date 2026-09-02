@@ -71,11 +71,12 @@ state file manually.
    Record only successful reads; follow the CONTEXT_CHECK evidence rules in `references/steps.md`.
 3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
    instead of stashing, resetting, committing, or deleting it.
-4. Only now, if `truedev.project.json` was missing, run `detect`, show the user what it found, and
-   write the file with `project-config init ... --user-confirmed` after the user confirms the
-   commands. This order is not optional: the file is a task-owned change, and writing it before the
-   clean-tree preflight would make that preflight fail on the workflow's own edit. Never write it
-   without asking, and never fall back to a guessed stack. See `references/project-config.md`.
+4. Only now, if `truedev.project.json` was missing, run `detect` and follow the adoption dialogue in
+   `references/project-config.md` — commands, then the unit runner, then the browser and
+   integration layers when detection names them — and write the answers with
+   `project-config init ... --user-confirmed`. This order is not optional: the file is a task-owned
+   change, and writing it before the clean-tree preflight would make that preflight fail on the
+   workflow's own edit. Never write it without asking, and never fall back to a guessed stack.
 5. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
    task-owned change; never start with tracked or potentially committable state.
 6. Detect the default branch only from a valid `origin/HEAD`. If Git cannot identify it

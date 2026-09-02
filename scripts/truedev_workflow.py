@@ -41,6 +41,8 @@ PROJECT_CONFIG_FILE = "truedev.project.json"
 DEFAULT_PLAN_DIR = "docs/plan"
 PROJECT_COMMANDS = ("build", "lint", "test", "e2e")
 TEST_SETUP_VALUES = frozenset({"declined:once", "declined:always"})
+SETUP_FIELDS = ("test_setup", "e2e_setup", "integration_test")
+ADOPTED_FROM_VALUES = frozenset({"empty"})
 SLICE_STATUSES = frozenset({"pending", "completed"})
 LIFECYCLE_FILE = "lifecycle.json"
 PROJECT_INIT_FILE = "project-init.json"
@@ -1476,6 +1478,9 @@ def detect_project(root: Path) -> dict[str, Any]:
         "suggested_entry_phase": entry,
         "plan": {"native": native_plan, "candidates": candidates},
         "project_config": (root / PROJECT_CONFIG_FILE).is_file(),
+        "adopted_from_hint": "empty" if not has_source and all(
+            command is None for command in commands.values()
+        ) else None,
     }
 
 
@@ -1522,11 +1527,21 @@ def validate_project_config(value: Any) -> None:
             part in {"", ".", ".."} or SAFE_PATH_COMPONENT.fullmatch(part) is None for part in parts
         ):
             raise WorkflowError("plan_dir must be a repository-relative path with safe components")
-    setup = value.get("test_setup")
-    if setup is not None:
-        _validate_text(setup, "test_setup", maximum=100)
+    for field in SETUP_FIELDS:
+        setup = value.get(field)
+        if setup is None:
+            # Absent is not the same as declined: the offer has simply not been made yet.
+            continue
+        _validate_text(setup, field, maximum=100)
         if setup not in TEST_SETUP_VALUES and not setup.partition("accepted:")[2].strip():
-            raise WorkflowError('test_setup must be "accepted:<runner>", "declined:once", or "declined:always"')
+            raise WorkflowError(
+                f'{field} must be "accepted:<tool>", "declined:once", or "declined:always"'
+            )
+    adopted_from = value.get("adopted_from")
+    if adopted_from is not None:
+        _validate_text(adopted_from, "adopted_from", maximum=32)
+        if adopted_from not in ADOPTED_FROM_VALUES:
+            raise WorkflowError('adopted_from must be "empty" when present')
     if value.get("adopted_at") is not None:
         _validate_timestamp(value["adopted_at"], "adopted_at")
 
@@ -1558,6 +1573,9 @@ def project_config_init(args: argparse.Namespace) -> int:
         "commands": {name: getattr(args, name) for name in PROJECT_COMMANDS},
         "plan_dir": args.plan_dir,
         "test_setup": args.test_setup,
+        "e2e_setup": args.e2e_setup,
+        "integration_test": args.integration_test,
+        "adopted_from": args.adopted_from,
         "adopted_at": utc_now(),
     }
     validate_project_config(value)
@@ -2321,6 +2339,9 @@ def build_parser() -> argparse.ArgumentParser:
         config_init.add_argument(f"--{name}")
     config_init.add_argument("--plan-dir")
     config_init.add_argument("--test-setup")
+    config_init.add_argument("--e2e-setup")
+    config_init.add_argument("--integration-test")
+    config_init.add_argument("--adopted-from", choices=sorted(ADOPTED_FROM_VALUES))
     config_init.add_argument("--overwrite", action="store_true")
     config_init.add_argument("--user-confirmed", action="store_true")
     config_init.set_defaults(func=project_config_init)

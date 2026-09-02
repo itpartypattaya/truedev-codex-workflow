@@ -4,6 +4,27 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.13] — 2026-09-02
+
+### Added
+- Adoption asks about each test layer separately and records each answer in its own field:
+  `test_setup` for the unit runner, `e2e_setup` for the browser layer, `integration_test` for a
+  real-client layer such as a bot driven through an ordinary user account. One offer covering three
+  different decisions meant the two a project most needed were never made.
+- The offers themselves are written out in `references/project-config.md`, with what each layer
+  costs and what it buys. The person who most needs the offer is the one who has not heard of the
+  tool, and "set up an integration client?" is not a question they can answer.
+- `adopted_from: "empty"` marks a repository adopted before it had any code. The first step that
+  finds a manifest runs the dialogue again instead of reporting "not configured" for the rest of
+  the project's life; `detect` reports the same condition as `adopted_from_hint`.
+
+### Changed
+- Silence is not a decline. An unanswered offer records nothing and stands again at the next slice
+  that adds real logic; `declined:once` returns once; `declined:always` never returns.
+- Installing an accepted layer belongs to the first slice that needs it, in that branch, through
+  the same review as the code. Credentials stay in the environment, and an integration layer that
+  needs real ones does not run in CI by default.
+
 ## [1.1.12] — 2026-09-02
 
 ### Added

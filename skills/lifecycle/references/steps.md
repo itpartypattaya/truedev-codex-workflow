@@ -12,11 +12,14 @@ the evidence presented to the user.
 2. Run the bundled `git-preflight --require-clean` before branch or worktree changes.
 3. Load the project's commands with `project-config show`, having already read the repository's own
    command sources — `Makefile`, package manifest, CI configuration — and named them as evidence.
-   If `show` exits 2, run `detect`, present the detected stack and commands next to what you read,
-   and write them with `project-config init ... --user-confirmed` only after the user confirms. Do
-   this after the preflight, never before: the file is a task-owned change, and writing it first
-   makes the clean-tree check fail on the workflow's own edit. A `null` command marks an absent
-   layer, not a command to invent.
+   If `show` exits 2, run `detect` and follow `The adoption dialogue` in
+   `references/project-config.md`: commands first, then the unit runner if there is no test
+   command, then the browser layer if the project has a UI, then the integration layer if the
+   detection named one. Each is its own question; silence is not a decline. Write the answers with
+   `project-config init ... --user-confirmed` only after the user confirms. Do this after the
+   preflight, never before: the file is a task-owned change, and writing it first makes the
+   clean-tree check fail on the workflow's own edit. A `null` command marks an absent layer, not a
+   command to invent.
 4. Confirm the slice dependencies are completed and the task does not overlap unrelated work.
 5. Record any unavailable validation layers. Do not treat them as passed.
 6. Finish `CONTEXT_CHECK` through the runner.
@@ -72,9 +75,15 @@ Open the COMPONENTS gate and stop.
    only where that layer exists and materially protects the behavior.
 3. Run the narrow tests first, then the repository's broader relevant suite, using `commands.test`
    and `commands.e2e` from `truedev.project.json`. A `null` command means that layer was skipped;
-   say so rather than substituting another command. When `test_setup` records an accepted runner
-   and no test command exists yet, setting that runner up is part of this slice.
-4. Record commands, outcomes, and unavailable layers. Finish TEST when evidence is reproducible.
+   say so rather than substituting another command. When a layer was accepted but its command is
+   still empty, installing it is part of this slice: `test_setup` for the unit runner, `e2e_setup`
+   for the browser layer, `integration_test` for a real-client layer. Install one layer at a time,
+   fill in the matching command, and keep credentials in the environment — never in the repository.
+   An integration layer needing real credentials does not run in CI by default; say that when you
+   report the evidence.
+4. If a layer was declined `once` and this slice adds real logic, the offer stands again — make it
+   once, and record the answer. `declined:always` is never raised again.
+5. Record commands, outcomes, and unavailable layers. Finish TEST when evidence is reproducible.
 
 ## VERIFY — user gate
 

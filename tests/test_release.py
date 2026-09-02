@@ -40,7 +40,7 @@ class ReleaseTests(unittest.TestCase):
     def test_release_contract(self) -> None:
         validator = load_script("validate_release")
         manifest = validator.validate()
-        self.assertEqual(manifest["version"], "1.1.12")
+        self.assertEqual(manifest["version"], "1.1.13")
 
     def test_package_is_deterministic_and_minimal(self) -> None:
         package_module = load_script("package_plugin")
