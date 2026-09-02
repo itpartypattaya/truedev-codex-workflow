@@ -32,6 +32,10 @@ the user's repository.
 
 - **status or no explicit action:** run `project-init status` and make no changes.
 - **start `<spec>`:** inspect the spec and existing docs, then initialize state.
+- **existing repository:** run `detect`, present the artifacts and stack it found, and offer to
+  enter at the phase it suggests instead of regenerating documents the project already has.
+- **next slice:** run `project-init next-slice [--plan-dir <plan-dir>]` and hand the file it names
+  to `$lifecycle`. Report its `reason` and `blocked` list when it exits non-zero.
 - **approve `<PHASE>`:** only after the latest user message explicitly approves the exact phase,
   run `project-init approve --phase <PHASE> --user-confirmed`.
 - **continue/resume:** validate state and read only the active phase in
@@ -49,14 +53,20 @@ the user's repository.
 3. If a target artifact exists, show the conflict and obtain permission before overwriting or
    materially restructuring it.
 4. Ensure `.truedev-workflow/` is ignored by Git. Refuse tracked or potentially committable state.
-5. Run:
+5. Run `detect`. When it reports a `suggested_entry_phase` later than `INPUT_VALIDATION`, list the
+   artifacts that justify it and ask the user whether to adopt those phases as already done. Start
+   at a later phase only with that explicit confirmation; never skip a phase silently, and never
+   claim an adopted artifact was reviewed by this workflow.
+6. Run:
 
 ```text
 python3 <RUNNER> project-init start --project "<name>" --spec "<source>"
+python3 <RUNNER> project-init start --project "<name>" --spec "<source>" \
+  --from <PHASE> --user-confirmed
 ```
 
-6. Execute `INPUT_VALIDATION` using its contract in `references/phases.md`, write the proposed
-   requirements, present open questions, then open its gate.
+7. Execute the entry phase using its contract in `references/phases.md`, write the proposed
+   artifact, present open questions, then open its gate.
 
 ## Transition commands
 
@@ -67,15 +77,16 @@ python3 <RUNNER> project-init finish --phase FINALIZE
 python3 <RUNNER> project-init gate --phase <USER_PHASE>
 python3 <RUNNER> project-init approve --phase <USER_PHASE> --user-confirmed
 python3 <RUNNER> project-init validate-slices --plan-dir docs/plan
+python3 <RUNNER> project-init next-slice --plan-dir docs/plan
 python3 <RUNNER> project-init abandon --user-confirmed
 python3 <RUNNER> project-init archive
 ```
 
 Before opening a gate, ensure the durable artifact contains the decisions and evidence the user is
 approving. Once a gate is open, mutating repository tools are blocked by the optional hooks.
-Use only the bundled `inspect git-status`, `inspect git-diff`, and `inspect file --path <path>`
-commands for additional evidence while a gate is open; raw shell and Git reads are intentionally
-blocked.
+Use only the bundled `inspect git-status`, `inspect git-diff`, `inspect file --path <path>`,
+`detect`, and `project-config show` commands for additional evidence while a gate is open; raw
+shell and Git reads are intentionally blocked.
 
 ## Phase order and artifacts
 

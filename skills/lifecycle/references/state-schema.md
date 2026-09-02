@@ -14,6 +14,11 @@ an OS advisory lock and validates these invariants before every atomic replace:
   ordered approval receipt after its gate receipt.
 - `COMPONENTS` alone may complete with `outcome: not_applicable` and one deterministic skip receipt
   when the work has no UI surface.
+- In `project-init` only, phases before the confirmed entry phase may complete with
+  `outcome: pre_existing` and one `adopt` receipt each, recorded with actor `user-explicit`.
+  Adopted phases must form an unbroken prefix, may never include `FINALIZE`, and carry no approval
+  receipt: they record that the user vouched for existing artifacts, not that this workflow
+  reviewed them.
 - Lifecycle transitions and mutation hooks require the active Git branch to match the branch recorded
   at workflow start. Status remains readable and labels a mismatch for recovery. The placeholders
   `(detached)` and `(git-unavailable)` identify no commit, so they can never be recorded by recovery
@@ -27,6 +32,8 @@ an OS advisory lock and validates these invariants before every atomic replace:
   marks it `MOVED` when the branch name still matches but the commit no longer does.
 - The state directory must be a real directory inside the repository; a symlink or junction in
   that path fails closed.
+- The non-Git fallback that looks for a standalone state root stops at your home directory, so a
+  forgotten `.truedev-workflow/` high in the tree cannot capture unrelated directories below it.
 
 Hooks first recognize validated `.git` directory/worktree markers, then ask Git only for unusual
 layouts before considering a standalone state root. This avoids a Git subprocess on every normal
@@ -42,6 +49,10 @@ Session restoration injects only a small allowlisted summary: workflow name, cur
 validated repository-relative `<plan-dir>/slice-*.md` reference, and compact flag. Every plan-directory
 component is restricted to ASCII letters, digits, `.`, `_`, and `-`. Task text and arbitrary state
 values are never promoted into developer context.
+
+`truedev.project.json` is not state. It is a normal committed file holding the project's own
+build, lint, test, and E2E commands, written only after the user confirms them; see
+`project-config.md`.
 
 The state and hooks are workflow guardrails. They do not replace repository permissions, sandboxing,
 code review, protected branches, CI, or provider-side authorization.

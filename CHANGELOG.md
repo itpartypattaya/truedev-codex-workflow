@@ -4,6 +4,34 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.11] — 2026-09-02
+
+### Added
+- `detect` reads a repository and reports its stack, package manager, build/lint/test/E2E
+  commands, existing planning documents, and a suggested entry phase. The skills had been told
+  not to assume a stack but were given no way to find out what the stack actually was, so the
+  work fell back to whatever the model guessed from a directory listing.
+- `truedev.project.json`, written only by `project-config init --user-confirmed`, records the
+  project's own commands. A `null` entry states that a layer does not exist, which the skills
+  now report as a skipped check instead of substituting a plausible command.
+- `project-init start --from <PHASE> --user-confirmed` adopts earlier phases as `pre_existing`
+  with one `adopt` receipt each. An existing repository previously had to regenerate
+  requirements and a PRD it already had, or skip phases with no record of who decided that.
+- `project-init next-slice` answers which slice is ready, with the blocked ones and their
+  unmet dependencies. Slice selection was prose in the skill that hardcoded `docs/plan/`, so a
+  custom plan directory was invisible and a blocked dependency was one misreading away. Both slice
+  commands now take the plan directory from the project file when no flag is given.
+
+### Fixed
+- The non-Git fallback for locating a state root now stops at the home directory. A forgotten
+  `.truedev-workflow/` high in the tree captured every directory beneath it, so unrelated work
+  in a sibling project was gated by a workflow the user had abandoned months earlier.
+- `--resume` no longer discards baseline eval runs when skill text changes. The baseline is
+  instructed not to read the skill, so its answer cannot depend on it.
+- Adopting the project description is ordered after the clean-tree preflight in both the skill and
+  the step playbook. The two documents disagreed, and the earlier order wrote a task-owned file and
+  then failed the preflight on that same file.
+
 ## [1.1.10] — 2026-09-02
 
 ### Fixed

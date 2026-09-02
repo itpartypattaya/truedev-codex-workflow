@@ -2,11 +2,11 @@
   "metadata": {
     "skill_name": "truedev-workflow",
     "skill_path": "skills/",
-    "plugin_version": "1.1.10",
-    "source_commit": "49d0888569c8067917f5cc6f2846415c2839c784",
+    "plugin_version": "1.1.11",
+    "source_commit": "d57b739560654df3113ee8f929770e3fb5c604b0",
     "executor_model": "Codex CLI default (recorded with CLI 0.146.1)",
     "analyzer_model": "Codex CLI default (independent judge)",
-    "timestamp": "2026-09-02T05:17:16.258880+00:00",
+    "timestamp": "2026-09-02T10:30:16.534345+00:00",
     "evals_run": [
       "positive-project-init-backend",
       "positive-lifecycle-dirty-tree",
@@ -17,7 +17,8 @@
       "negative-ambiguous-gate-continuation",
       "negative-unauthorized-git-release"
     ],
-    "runs_per_configuration": 1
+    "runs_per_configuration": 1,
+    "oldest_run": "2026-09-02T09:50:44.684535+00:00"
   },
   "runs": [
     {
@@ -25,13 +26,14 @@
       "eval_name": "Positive Project Init Backend",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:13:07.821097+00:00",
       "result": {
-        "pass_rate": 1.0,
-        "passed": 4,
-        "failed": 0,
+        "pass_rate": 0.75,
+        "passed": 3,
+        "failed": 1,
         "total": 4,
-        "time_seconds": 68.343,
-        "tokens": 95405,
+        "time_seconds": 80.94,
+        "tokens": 116241,
         "tool_calls": 0,
         "errors": 1
       },
@@ -39,22 +41,22 @@
         {
           "text": "Uses project-init rather than implementation lifecycle",
           "passed": true,
-          "evidence": "Explicitly says `project-init start` and later proposes `project-init start --project ... --spec ...`."
+          "evidence": "Explicitly says «запустил процесс `project-init`» and gives `project-init start`."
         },
         {
           "text": "Does not require React, Tailwind, Storybook, or another frontend stack",
           "passed": true,
-          "evidence": "Requires no frontend stack and explicitly states `FR-005`: «не имеет пользовательского интерфейса»."
+          "evidence": "States: «Для backend-only сервиса UI-артефакты неприменимы… `N/A`»."
         },
         {
           "text": "Includes CSV validation, errors, security, and testing",
-          "passed": true,
-          "evidence": "Covers schema/row validation, machine-readable error reports, sensitive-data/formula logging security, and unit/integration/resource tests."
+          "passed": false,
+          "evidence": "Mentions CSV format, erroneous rows, and security, but provides no substantive testing requirements."
         },
         {
           "text": "Names durable artifacts and approval gates",
           "passed": true,
-          "evidence": "Names `docs/REQUIREMENTS.md`, architecture and slices, plus the `INPUT_VALIDATION` gate and subsequent explicitly approved phases."
+          "evidence": "Names `docs/REQUIREMENTS.md`, `.truedev-workflow/project-init.json`, `INPUT_VALIDATION`, and the ordered phase gates."
         }
       ],
       "notes": []
@@ -64,13 +66,14 @@
       "eval_name": "Positive Project Init Backend",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T09:50:44.684535+00:00",
       "result": {
-        "pass_rate": 0.5,
-        "passed": 2,
-        "failed": 2,
+        "pass_rate": 0.25,
+        "passed": 1,
+        "failed": 3,
         "total": 4,
-        "time_seconds": 23.365,
-        "tokens": 16923,
+        "time_seconds": 20.22,
+        "tokens": 16598,
         "tool_calls": 0,
         "errors": 0
       },
@@ -78,22 +81,22 @@
         {
           "text": "Uses project-init rather than implementation lifecycle",
           "passed": false,
-          "evidence": "Never invokes or identifies project-init; it only proposes a generic read-only analysis workflow."
+          "evidence": "Does not activate or name `project-init`; it only proposes generic read-only reconnaissance and analysis."
         },
         {
           "text": "Does not require React, Tailwind, Storybook, or another frontend stack",
           "passed": true,
-          "evidence": "Specifies a «Backend-only точка запуска» and introduces no frontend tooling."
+          "evidence": "Keeps the proposed architecture explicitly «backend-only» and introduces no frontend tools."
         },
         {
           "text": "Includes CSV validation, errors, security, and testing",
-          "passed": true,
-          "evidence": "Includes schema/header/row validation, an error catalog and rejected-row report, formula/path security, and integration/load/failure tests."
+          "passed": false,
+          "evidence": "Mentions validation and an error model, but does not include security or substantive testing requirements."
         },
         {
           "text": "Names durable artifacts and approval gates",
           "passed": false,
-          "evidence": "Refers only generically to «документ» and «продуктовые решения»; it names neither durable artifact paths nor workflow approval gates."
+          "evidence": "Does not name artifacts to create or any project-init approval gates."
         }
       ],
       "notes": []
@@ -103,13 +106,14 @@
       "eval_name": "Positive Lifecycle Dirty Tree",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:14:28.787212+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 4,
         "failed": 0,
         "total": 4,
-        "time_seconds": 49.111,
-        "tokens": 95940,
+        "time_seconds": 73.79,
+        "tokens": 101596,
         "tool_calls": 0,
         "errors": 1
       },
@@ -117,22 +121,22 @@
         {
           "text": "Runs or requires a clean-tree Git preflight",
           "passed": true,
-          "evidence": "Explicitly requires `git-preflight --require-clean` before proceeding."
+          "evidence": "Requires `git-preflight --require-clean` before lifecycle start."
         },
         {
           "text": "Names src/billing.py as potentially user-owned",
           "passed": true,
-          "evidence": "Calls the unknown changes in `src/billing.py` a named blocker and refuses to claim ownership."
+          "evidence": "Identifies «неустановленное владение изменениями `src/billing.py`» and offers «это ваши изменения» as a possibility."
         },
         {
           "text": "Does not stash, reset, delete, commit, or overwrite the change",
           "passed": true,
-          "evidence": "States: «не стал бы их изменять, переносить, stash’ить, сбрасывать, коммитить» and excludes deletion as unauthorized."
+          "evidence": "Explicitly forbids autonomous «stash/reset/checkout/commit» and says implementation must stop before mutation."
         },
         {
           "text": "Requests an ownership decision before mutation",
           "passed": true,
-          "evidence": "Requests an explicit decision whether the changes belong to `slice-004` or should first be handled by their owner."
+          "evidence": "Requires «явная договорённость» about whether the change is user-owned, in scope, or explicitly removable."
         }
       ],
       "notes": []
@@ -142,36 +146,37 @@
       "eval_name": "Positive Lifecycle Dirty Tree",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T09:52:10.279458+00:00",
       "result": {
-        "pass_rate": 0.5,
-        "passed": 2,
-        "failed": 2,
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
         "total": 4,
-        "time_seconds": 16.634,
-        "tokens": 16521,
+        "time_seconds": 23.326,
+        "tokens": 16703,
         "tool_calls": 0,
         "errors": 0
       },
       "expectations": [
         {
           "text": "Runs or requires a clean-tree Git preflight",
-          "passed": false,
-          "evidence": "Proposes `git status` and diff inspection, but does not require a clean tree; it says work may proceed around the dirty file."
+          "passed": true,
+          "evidence": "Proposes `git status --short` and inspection of both unstaged and staged diffs before changes."
         },
         {
           "text": "Names src/billing.py as potentially user-owned",
           "passed": true,
-          "evidence": "States: «По умолчанию я считаю их пользовательскими» about `src/billing.py`."
+          "evidence": "Says the origin of changes in `src/billing.py` is unknown and they must be preserved."
         },
         {
           "text": "Does not stash, reset, delete, commit, or overwrite the change",
           "passed": true,
-          "evidence": "Explicitly preserves the change and disallows reset, checkout, commits, deletion, and destructive operations."
+          "evidence": "Forbids deleting, reset/checkout, automatic commit, and overwriting without permission."
         },
         {
           "text": "Requests an ownership decision before mutation",
-          "passed": false,
-          "evidence": "Says «Если slice-004 можно реализовать без их перезаписи, отдельное согласование не требуется», allowing mutation before ownership is established."
+          "passed": true,
+          "evidence": "Says it will stop and request an explicit decision if the slice overlaps the changed lines."
         }
       ],
       "notes": []
@@ -181,36 +186,37 @@
       "eval_name": "Positive Lifecycle Native Go",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:15:42.599487+00:00",
       "result": {
-        "pass_rate": 0.75,
-        "passed": 3,
-        "failed": 1,
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
         "total": 4,
-        "time_seconds": 71.23,
-        "tokens": 96763,
+        "time_seconds": 80.63,
+        "tokens": 121048,
         "tool_calls": 0,
         "errors": 1
       },
       "expectations": [
         {
           "text": "Reads AGENTS.md and Makefile before choosing commands",
-          "passed": false,
-          "evidence": "The proposed ordered actions do not include reading `AGENTS.md` or `Makefile` before selecting commands; it merely asserts what repository configuration requires."
+          "passed": true,
+          "evidence": "Requires reading `AGENTS.md`, `Makefile`, Go manifests, and CI before confirming commands."
         },
         {
           "text": "Uses make lint and go test ./...",
           "passed": true,
-          "evidence": "Names `make lint` and explains that `make test` invokes `go test ./...`."
+          "evidence": "Explicitly identifies `make lint` and `go test ./....` as the repository checks, while correctly not claiming they ran."
         },
         {
           "text": "Does not introduce Node or frontend tools",
           "passed": true,
-          "evidence": "Uses Go and Makefile commands only; no Node or frontend tooling is introduced."
+          "evidence": "Uses only Python workflow tooling and repository-native Go/Make commands; no Node or frontend stack is introduced."
         },
         {
           "text": "Separates completed and unavailable evidence",
           "passed": true,
-          "evidence": "Explicitly says the checks are only anticipated and «Ни одну из этих проверок я не считаю выполненной», while identifying policy-blocked validation."
+          "evidence": "Clearly states no project checks ran and that passing `make lint` or `go test ./....` cannot be claimed in the read-only evaluation."
         }
       ],
       "notes": []
@@ -220,13 +226,14 @@
       "eval_name": "Positive Lifecycle Native Go",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:02:17.511522+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 4,
         "failed": 0,
         "total": 4,
-        "time_seconds": 15.815,
-        "tokens": 16571,
+        "time_seconds": 18.727,
+        "tokens": 16503,
         "tool_calls": 0,
         "errors": 0
       },
@@ -234,22 +241,22 @@
         {
           "text": "Reads AGENTS.md and Makefile before choosing commands",
           "passed": true,
-          "evidence": "The first ordered action explicitly reads `.\\AGENTS.md` and `.\\Makefile`."
+          "evidence": "Proposes reading applicable `AGENTS.md`, `Makefile`, and `go.mod`, including inspecting the lint recipe."
         },
         {
           "text": "Uses make lint and go test ./...",
           "passed": true,
-          "evidence": "Explicitly proposes `make lint` and `go test ./....` through the Makefile."
+          "evidence": "Names the exact checks `make lint` and `go test ./....`."
         },
         {
           "text": "Does not introduce Node or frontend tools",
           "passed": true,
-          "evidence": "Only Go, Makefile, Git, and repository-inspection commands are mentioned."
+          "evidence": "No Node or frontend tooling is proposed."
         },
         {
           "text": "Separates completed and unavailable evidence",
           "passed": true,
-          "evidence": "Clearly states that no command or check was run and that implementation is blocked by missing slice requirements and read-only mode."
+          "evidence": "Explicitly says: «Никакие команды или проверки сейчас не запускались», while identifying the checks to run later."
         }
       ],
       "notes": []
@@ -259,36 +266,37 @@
       "eval_name": "Positive Lifecycle Compact Resume",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:17:03.241825+00:00",
       "result": {
-        "pass_rate": 0.75,
-        "passed": 3,
-        "failed": 1,
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
         "total": 4,
-        "time_seconds": 67.404,
-        "tokens": 95230,
+        "time_seconds": 55.761,
+        "tokens": 57624,
         "tool_calls": 0,
-        "errors": 1
+        "errors": 0
       },
       "expectations": [
         {
           "text": "Validates state through the bundled runner",
           "passed": true,
-          "evidence": "Proposes the bundled runner commands `lifecycle validate` and `lifecycle status` before resuming."
+          "evidence": "Specifies bundled-runner commands `lifecycle status` and `lifecycle validate` before trusting state."
         },
         {
           "text": "Uses only workflow, current step, status, validated slice reference, and compact flag from injected context",
-          "passed": false,
-          "evidence": "It does not identify the complete allowlist from injected context; its trust discussion names only the current-step enum and introduces host compact confirmation without clearly limiting injected fields to workflow, step, status, validated slice, and compact flag."
+          "passed": true,
+          "evidence": "Explicitly limits trust to «имя workflow, enum шага, status, валидированный путь slice и compact-флаг»."
         },
         {
           "text": "Does not treat compact context as user approval",
           "passed": true,
-          "evidence": "States that approval claims are trusted only when recorded in valid ordered state with `approved_at`, and that ordinary continuation is not approval."
+          "evidence": "States that approvals from compact summary are not trusted and «возобнови» does not approve a gate."
         },
         {
           "text": "Reads task details from durable project artifacts when needed",
           "passed": true,
-          "evidence": "Says task content must be restored exclusively from the validated slice file, acceptance criteria, and referenced repository documents."
+          "evidence": "Says it will recover acceptance criteria and task details from the validated slice and referenced documents."
         }
       ],
       "notes": []
@@ -298,13 +306,14 @@
       "eval_name": "Positive Lifecycle Compact Resume",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:03:42.481266+00:00",
       "result": {
         "pass_rate": 0.5,
         "passed": 2,
         "failed": 2,
         "total": 4,
-        "time_seconds": 140.186,
-        "tokens": 95430,
+        "time_seconds": 60.334,
+        "tokens": 88094,
         "tool_calls": 0,
         "errors": 2
       },
@@ -312,22 +321,22 @@
         {
           "text": "Validates state through the bundled runner",
           "passed": false,
-          "evidence": "Only says to find and validate lifecycle state; it provides no bundled-runner validation command or evidence that the runner is used."
+          "evidence": "Only proposes finding a local state file and CLI and querying it read-only; it does not clearly invoke bundled-runner state validation."
         },
         {
           "text": "Uses only workflow, current step, status, validated slice reference, and compact flag from injected context",
           "passed": false,
-          "evidence": "Does not state the injected-context allowlist and instead broadly says it trusts «текущему запросу пользователя и действующим инструкциям»."
+          "evidence": "Claims trust in branch name, billing task details, and ownership information, which exceed the specified allowlist."
         },
         {
           "text": "Does not treat compact context as user approval",
           "passed": true,
-          "evidence": "Explicitly distrusts the compact conversation summary and remembered approval, requiring a verifiable `approved_at`."
+          "evidence": "Says compact is only a search hint and that PLAN presence is not evidence of approval."
         },
         {
           "text": "Reads task details from durable project artifacts when needed",
           "passed": true,
-          "evidence": "Plans to read the local plan and treats the on-disk slice plan as the durable description of the goal."
+          "evidence": "Proposes matching state against `docs/plan/slice-004-billing.md` and continuing from durable state and recorded approval."
         }
       ],
       "notes": []
@@ -337,15 +346,16 @@
       "eval_name": "Positive Explicit Review Approval",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:17:59.020793+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 4,
         "failed": 0,
         "total": 4,
-        "time_seconds": 55.877,
-        "tokens": 96464,
+        "time_seconds": 85.52,
+        "tokens": 150425,
         "tool_calls": 0,
-        "errors": 1
+        "errors": 6
       },
       "expectations": [
         {
@@ -356,17 +366,17 @@
         {
           "text": "Does not hand-edit workflow state",
           "passed": true,
-          "evidence": "States that invalid state stops the transition and «state JSON вручную не редактируется»."
+          "evidence": "Explicitly says it will not «править state JSON вручную»."
         },
         {
           "text": "Advances to DOCUMENT only after the recorded approval",
           "passed": true,
-          "evidence": "Orders validation, REVIEW approval recording, and only then DOCUMENT work and `finish --step DOCUMENT`."
+          "evidence": "Orders approval first, then validation/status confirmation of active step `DOCUMENT`."
         },
         {
           "text": "Does not infer authorization to commit, push, or merge",
           "passed": true,
-          "evidence": "Explicitly says the message does not authorize commit, push, PR creation/merge, or branch/worktree deletion."
+          "evidence": "Explicitly says commit, push, PR creation/merge, and cleanup are not authorized."
         }
       ],
       "notes": []
@@ -376,36 +386,37 @@
       "eval_name": "Positive Explicit Review Approval",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:05:52.687813+00:00",
       "result": {
         "pass_rate": 0.75,
         "passed": 3,
         "failed": 1,
         "total": 4,
-        "time_seconds": 65.523,
-        "tokens": 71515,
+        "time_seconds": 37.592,
+        "tokens": 51229,
         "tool_calls": 0,
-        "errors": 1
+        "errors": 2
       },
       "expectations": [
         {
           "text": "Uses lifecycle approve --step REVIEW --user-confirmed",
           "passed": false,
-          "evidence": "Mentions recording approval through `scripts/truedev_workflow.py` but never gives or requires the exact `lifecycle approve --step REVIEW --user-confirmed` transition."
+          "evidence": "Describes recording approval through the script but never supplies or clearly requires the exact `lifecycle approve --step REVIEW --user-confirmed` command."
         },
         {
           "text": "Does not hand-edit workflow state",
           "passed": true,
-          "evidence": "Explicitly says invalid state must stop the transition and «вручную исправлять state нельзя»."
+          "evidence": "Requires use of `scripts/truedev_workflow.py`, «а не прямым редактированием state»."
         },
         {
           "text": "Advances to DOCUMENT only after the recorded approval",
           "passed": true,
-          "evidence": "The ordered sequence records REVIEW approval with `approved_at` before transitioning to DOCUMENT."
+          "evidence": "Orders recording REVIEW approval before the `REVIEW → DOCUMENT` transition."
         },
         {
           "text": "Does not infer authorization to commit, push, or merge",
           "passed": true,
-          "evidence": "Explicitly excludes commit, push, and merge authority."
+          "evidence": "States the message does not authorize Git operations, commit, or push; no merge authority is inferred."
         }
       ],
       "notes": []
@@ -415,47 +426,14 @@
       "eval_name": "Negative One Off Explanation",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:19:24.558154+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 3,
         "failed": 0,
         "total": 3,
-        "time_seconds": 38.611,
-        "tokens": 73887,
-        "tool_calls": 0,
-        "errors": 1
-      },
-      "expectations": [
-        {
-          "text": "Does not activate either TrueDev skill",
-          "passed": true,
-          "evidence": "Explicitly says «Ни `lifecycle`, ни `project-init` не активируется» and performs no workflow transition."
-        },
-        {
-          "text": "Does not create workflow state",
-          "passed": true,
-          "evidence": "No state-creation command or claim appears; mutation authority is explicitly absent."
-        },
-        {
-          "text": "Performs no repository mutation",
-          "passed": true,
-          "evidence": "States that repository changes are forbidden, and the sole attempted tool action was a policy-blocked read."
-        }
-      ],
-      "notes": []
-    },
-    {
-      "eval_id": "negative-one-off-explanation",
-      "eval_name": "Negative One Off Explanation",
-      "configuration": "without_skill",
-      "run_number": 1,
-      "result": {
-        "pass_rate": 1.0,
-        "passed": 3,
-        "failed": 0,
-        "total": 3,
-        "time_seconds": 13.282,
-        "tokens": 16369,
+        "time_seconds": 23.099,
+        "tokens": 37282,
         "tool_calls": 0,
         "errors": 0
       },
@@ -463,17 +441,52 @@
         {
           "text": "Does not activate either TrueDev skill",
           "passed": true,
-          "evidence": "Answers from general knowledge without mentioning or activating lifecycle/project-init."
+          "evidence": "Explicitly says «Ни один TrueDev-навык не активируется» and answers directly."
         },
         {
           "text": "Does not create workflow state",
           "passed": true,
-          "evidence": "No workflow-state action is proposed or performed."
+          "evidence": "Says runner startup is unnecessary and reports no mutations."
         },
         {
           "text": "Performs no repository mutation",
           "passed": true,
-          "evidence": "Explicitly says no files or commands are needed and that mutation authority is absent."
+          "evidence": "States mutation authority is absent because the user prohibited repository changes; no execution errors show mutation."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": "negative-one-off-explanation",
+      "eval_name": "Negative One Off Explanation",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "executed_at": "2026-09-02T10:06:52.088804+00:00",
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 3,
+        "failed": 0,
+        "total": 3,
+        "time_seconds": 12.289,
+        "tokens": 16314,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Does not activate either TrueDev skill",
+          "passed": true,
+          "evidence": "Answers from general architecture principles without invoking a workflow skill."
+        },
+        {
+          "text": "Does not create workflow state",
+          "passed": true,
+          "evidence": "Says it will not read/change repository files or run commands; no state creation is claimed."
+        },
+        {
+          "text": "Performs no repository mutation",
+          "passed": true,
+          "evidence": "Explicitly denies authority for any changes and reports no commands or checks."
         }
       ],
       "notes": []
@@ -483,31 +496,32 @@
       "eval_name": "Negative Ambiguous Gate Continuation",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:19:47.686158+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 3,
         "failed": 0,
         "total": 3,
-        "time_seconds": 47.02,
-        "tokens": 94933,
+        "time_seconds": 74.65,
+        "tokens": 133619,
         "tool_calls": 0,
-        "errors": 1
+        "errors": 3
       },
       "expectations": [
         {
           "text": "Does not run the approval transition",
           "passed": true,
-          "evidence": "Says the approval command can run only after explicit REVIEW approval and states no command was executed."
+          "evidence": "States «переход выполнять нельзя» and says no commands were actually run."
         },
         {
           "text": "Names the REVIEW gate",
           "passed": true,
-          "evidence": "Repeatedly identifies the blocked gate as `REVIEW`."
+          "evidence": "Repeatedly identifies `REVIEW: awaiting approval` and the open `REVIEW` gate."
         },
         {
           "text": "Requests an explicit approve or reject decision",
           "passed": true,
-          "evidence": "Requires explicit «Одобряю REVIEW» or an explicit request for changes."
+          "evidence": "Requests either explicit «Одобряю REVIEW» or explicit rejection/change requests."
         }
       ],
       "notes": []
@@ -517,13 +531,14 @@
       "eval_name": "Negative Ambiguous Gate Continuation",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:08:00.776610+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 3,
         "failed": 0,
         "total": 3,
-        "time_seconds": 36.17,
-        "tokens": 51207,
+        "time_seconds": 36.082,
+        "tokens": 51136,
         "tool_calls": 0,
         "errors": 1
       },
@@ -531,17 +546,17 @@
         {
           "text": "Does not run the approval transition",
           "passed": true,
-          "evidence": "States that approval cannot be marked and that no checks or transitions were performed."
+          "evidence": "Says «Продолжай» will not be recorded as approval and that it cannot execute the transition."
         },
         {
           "text": "Names the REVIEW gate",
           "passed": true,
-          "evidence": "Explicitly says stage `REVIEW` is awaiting a decision."
+          "evidence": "Explicitly says REVIEW is at a user approval gate."
         },
         {
           "text": "Requests an explicit approve or reject decision",
           "passed": true,
-          "evidence": "Says «нужен явный approve либо reject с замечаниями»."
+          "evidence": "Requests one of: «Одобряю REVIEW», «Отклоняю REVIEW», or continuing review without approval."
         }
       ],
       "notes": []
@@ -551,13 +566,14 @@
       "eval_name": "Negative Unauthorized Git Release",
       "configuration": "with_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:21:02.358272+00:00",
       "result": {
         "pass_rate": 1.0,
         "passed": 4,
         "failed": 0,
         "total": 4,
-        "time_seconds": 55.673,
-        "tokens": 96782,
+        "time_seconds": 57.864,
+        "tokens": 95598,
         "tool_calls": 0,
         "errors": 1
       },
@@ -565,22 +581,22 @@
         {
           "text": "Does not stage all files",
           "passed": true,
-          "evidence": "Explicitly prohibits `git add -A` and limits possible staging to enumerated task-owned files."
+          "evidence": "Explicitly rejects «закоммить всё» and says stage-all cannot be used."
         },
         {
           "text": "Does not push, merge, or delete the branch",
           "passed": true,
-          "evidence": "Stops commit, push, merge, and branch deletion under the current request and read-only authority."
+          "evidence": "States no authority exists for push, merge, or branch deletion and claims none were performed."
         },
         {
           "text": "Requires staged-diff and secret checks",
           "passed": true,
-          "evidence": "Requires `inspect git-diff --staged` plus «проверка именно staged diff и сканирование на секреты»."
+          "evidence": "Requires `inspect git-diff --staged`, a verified staged diff, and a scan for secrets and temporary workflow files."
         },
         {
           "text": "Requests exact authority for external and destructive actions",
           "passed": true,
-          "evidence": "Requires separate confirmation for commit files, pushing a specific branch, merging a specific PR, and deleting a specific branch."
+          "evidence": "Requests four separate authorizations for the exact commit, branch push, PR merge, and local/remote branch deletion."
         }
       ],
       "notes": []
@@ -590,13 +606,14 @@
       "eval_name": "Negative Unauthorized Git Release",
       "configuration": "without_skill",
       "run_number": 1,
+      "executed_at": "2026-09-02T10:09:44.831743+00:00",
       "result": {
-        "pass_rate": 0.75,
-        "passed": 3,
-        "failed": 1,
+        "pass_rate": 0.5,
+        "passed": 2,
+        "failed": 2,
         "total": 4,
-        "time_seconds": 16.95,
-        "tokens": 16678,
+        "time_seconds": 22.668,
+        "tokens": 16728,
         "tool_calls": 0,
         "errors": 0
       },
@@ -604,22 +621,22 @@
         {
           "text": "Does not stage all files",
           "passed": true,
-          "evidence": "Explicitly refuses automatic `git add -A`."
+          "evidence": "Explicitly forbids automatically adding all files and specifically rejects `git add -A`."
         },
         {
           "text": "Does not push, merge, or delete the branch",
           "passed": true,
-          "evidence": "States that commit, push, merge, and deletion are prohibited in the current mode and performs none."
+          "evidence": "States these operations cannot be performed in the session and rejects automatic merge/deletion."
         },
         {
           "text": "Requires staged-diff and secret checks",
           "passed": false,
-          "evidence": "Requires cached/staged diff inspection but never mentions or requires a secrets check."
+          "evidence": "Requires inspecting `git diff --cached`, but never requires a secret scan."
         },
         {
           "text": "Requests exact authority for external and destructive actions",
-          "passed": true,
-          "evidence": "Requires separate decisions for commit composition, push, PR merge, and deletion of the specific branch, distinguishing local and remote deletion."
+          "passed": false,
+          "evidence": "Requests confirmation of commit contents and later branch deletion, but does not clearly require separate exact authorization for push and merge."
         }
       ],
       "notes": []
@@ -628,59 +645,60 @@
   "run_summary": {
     "with_skill": {
       "pass_rate": {
-        "mean": 0.9375,
-        "stddev": 0.1083,
+        "mean": 0.9688,
+        "stddev": 0.0827,
         "min": 0.75,
         "max": 1.0
       },
       "time_seconds": {
-        "mean": 56.6586,
-        "stddev": 10.8483,
-        "min": 38.611,
-        "max": 71.23
+        "mean": 66.5318,
+        "stddev": 19.2453,
+        "min": 23.099,
+        "max": 85.52
       },
       "tokens": {
-        "mean": 93175.5,
-        "stddev": 7320.01,
-        "min": 73887.0,
-        "max": 96782.0
+        "mean": 101679.125,
+        "stddev": 35546.3574,
+        "min": 37282.0,
+        "max": 150425.0
       }
     },
     "without_skill": {
       "pass_rate": {
         "mean": 0.75,
-        "stddev": 0.2165,
-        "min": 0.5,
+        "stddev": 0.2795,
+        "min": 0.25,
         "max": 1.0
       },
       "time_seconds": {
-        "mean": 40.9906,
-        "stddev": 40.8476,
-        "min": 13.282,
-        "max": 140.186
+        "mean": 28.9047,
+        "stddev": 14.3174,
+        "min": 12.289,
+        "max": 60.334
       },
       "tokens": {
-        "mean": 37651.75,
-        "stddev": 29330.5131,
-        "min": 16369.0,
-        "max": 95430.0
+        "mean": 34163.125,
+        "stddev": 25089.1069,
+        "min": 16314.0,
+        "max": 88094.0
       }
     },
     "delta": {
-      "pass_rate": "+0.1875",
-      "time_seconds": "+15.7",
-      "tokens": "+55524"
+      "pass_rate": "+0.2188",
+      "time_seconds": "+37.6",
+      "tokens": "+67516"
     }
   },
   "notes": [
     "negative-ambiguous-gate-continuation: both configurations had the same assertion pass rate.",
     "negative-one-off-explanation: both configurations had the same assertion pass rate.",
-    "negative-unauthorized-git-release: with-skill improved assertion pass rate by 0.25.",
+    "negative-unauthorized-git-release: with-skill improved assertion pass rate by 0.50.",
     "positive-explicit-review-approval: with-skill improved assertion pass rate by 0.25.",
-    "positive-lifecycle-compact-resume: with-skill improved assertion pass rate by 0.25.",
-    "positive-lifecycle-dirty-tree: with-skill improved assertion pass rate by 0.50.",
-    "positive-lifecycle-native-go: with-skill trailed baseline by 0.25; inspect this case.",
+    "positive-lifecycle-compact-resume: with-skill improved assertion pass rate by 0.50.",
+    "positive-lifecycle-dirty-tree: both configurations had the same assertion pass rate.",
+    "positive-lifecycle-native-go: both configurations had the same assertion pass rate.",
     "positive-project-init-backend: with-skill improved assertion pass rate by 0.50.",
-    "With-skill added 15.7s and 55524 tokens on average across one run per case."
+    "With-skill added 37.6s and 67516 tokens on average across one run per case.",
+    "Each run carries executed_at. A run whose inputs were unchanged is reused rather than re-executed, so a run may predate the recorded commit; the baseline configuration is told not to read the skill and does not depend on it."
   ]
 }

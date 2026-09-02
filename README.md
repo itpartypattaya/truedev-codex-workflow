@@ -90,6 +90,53 @@ summary — the workflow name, the current step, its status, and the slice file.
 raw state never make it into that summary. If your Codex build does not emit a compact event, you
 can release the gate deliberately with `lifecycle release-compact --user-confirmed`.
 
+## Starting on a project that already exists
+
+Most repositories are not empty, and the skill is not allowed to guess what yours is. So it asks. In
+the commands below, `<RUNNER>` is the bundled script the plugin installs, at
+`<plugin-root>/scripts/truedev_workflow.py`; the skill runs these for you, and you can run them
+yourself to see the same answers.
+
+```text
+python3 <RUNNER> detect
+```
+
+That prints, as JSON, the stack and package manager it found, the build, lint, test, and E2E commands
+that actually exist, which planning documents are already written, and the phase it suggests you
+enter at. It only reads files. It writes nothing and decides nothing.
+
+You confirm the commands once, and they go into `truedev.project.json` in the repository root:
+
+```text
+python3 <RUNNER> project-config init --build "npm run build" --test "npm test" --user-confirmed
+```
+
+From then on the skill runs your commands instead of reaching for npm or Vitest. A command recorded
+as `null` means that layer does not exist here, and the skill says the check was skipped rather than
+inventing one. The file is committed with the project, and it is never written without your
+confirmation.
+
+If the project already has requirements, a PRD, or an architecture document, you can enter the
+process partway instead of regenerating them:
+
+```text
+python3 <RUNNER> project-init start --project "app" --spec "docs/spec.md" \
+  --from PLANNING --user-confirmed
+```
+
+The earlier phases are recorded as pre-existing, with your explicit receipt against each one. The
+workflow never claims it reviewed a document it did not write.
+
+When it is time to pick the next slice, the runner answers rather than the model:
+
+```text
+python3 <RUNNER> project-init next-slice
+```
+
+It returns the first pending slice whose dependencies are all completed, or names exactly which
+slices are blocked and on what. Without `--plan-dir` it uses the plan directory from
+`truedev.project.json`.
+
 ## Where state lives
 
 Everything active sits in `.truedev-workflow/` at the repository root, and it must be Git-ignored —
