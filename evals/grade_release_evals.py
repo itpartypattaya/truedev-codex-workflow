@@ -276,11 +276,18 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
     }
 
 
+def _write_published(path: Path, text: str) -> None:
+    """Committed evidence is eol=lf by .gitattributes.
+
+    Writing it with the platform's line endings left the tree dirty the moment the
+    grader finished, which the next run then records as -dirty provenance.
+    """
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def write_results(benchmark: dict[str, Any], runs: list[dict[str, Any]], judged: dict[str, Any]) -> None:
     RESULTS.mkdir(parents=True, exist_ok=True)
-    (RESULTS / "benchmark.json").write_text(
-        json.dumps(benchmark, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _write_published(RESULTS / "benchmark.json", json.dumps(benchmark, ensure_ascii=False, indent=2) + "\n")
     responses = [
         {
             "eval_id": run["eval_id"],
@@ -290,12 +297,8 @@ def write_results(benchmark: dict[str, Any], runs: list[dict[str, Any]], judged:
         }
         for run in runs
     ]
-    (RESULTS / "responses.json").write_text(
-        json.dumps(responses, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    (RESULTS / "grades.json").write_text(
-        json.dumps(judged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _write_published(RESULTS / "responses.json", json.dumps(responses, ensure_ascii=False, indent=2) + "\n")
+    _write_published(RESULTS / "grades.json", json.dumps(judged, ensure_ascii=False, indent=2) + "\n")
     summary = benchmark["run_summary"]
     lines = [
         "# Independent release benchmark",
@@ -313,7 +316,7 @@ def write_results(benchmark: dict[str, Any], runs: list[dict[str, Any]], judged:
         "",
         *[f"- {note}" for note in benchmark["notes"]],
     ]
-    (RESULTS / "benchmark.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_published(RESULTS / "benchmark.md", "\n".join(lines) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
