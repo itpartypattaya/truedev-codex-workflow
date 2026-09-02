@@ -92,27 +92,29 @@ can release the gate deliberately with `lifecycle release-compact --user-confirm
 
 ## Starting on a project that already exists
 
-Most repositories are not empty. Before anything else the skill asks the runner what is actually
-here:
+Most repositories are not empty, and the skill is not allowed to guess what yours is. So it asks. In
+the commands below, `<RUNNER>` is the bundled script the plugin installs, at
+`<plugin-root>/scripts/truedev_workflow.py`; the skill runs these for you, and you can run them
+yourself to see the same answers.
 
 ```text
 python3 <RUNNER> detect
 ```
 
-That prints, as JSON, the detected stack and package manager, the build/lint/test/E2E commands it
-could find, which planning documents already exist, and the phase it suggests you enter at. It only
-reads files. It writes nothing and decides nothing.
+That prints, as JSON, the stack and package manager it found, the build, lint, test, and E2E commands
+that actually exist, which planning documents are already written, and the phase it suggests you
+enter at. It only reads files. It writes nothing and decides nothing.
 
-You then confirm the commands once, and they are written to `truedev.project.json` in the repository
-root:
+You confirm the commands once, and they go into `truedev.project.json` in the repository root:
 
 ```text
 python3 <RUNNER> project-config init --build "npm run build" --test "npm test" --user-confirmed
 ```
 
-From then on the skill runs your commands instead of guessing at npm or Vitest. A command recorded as
-`null` means that layer does not exist here, and the skill will say a check was skipped rather than
-invent one.
+From then on the skill runs your commands instead of reaching for npm or Vitest. A command recorded
+as `null` means that layer does not exist here, and the skill says the check was skipped rather than
+inventing one. The file is committed with the project, and it is never written without your
+confirmation.
 
 If the project already has requirements, a PRD, or an architecture document, you can enter the
 process partway instead of regenerating them:
@@ -122,16 +124,18 @@ python3 <RUNNER> project-init start --project "app" --spec "docs/spec.md" \
   --from PLANNING --user-confirmed
 ```
 
-The adopted phases are recorded as pre-existing with your explicit receipt — the workflow never
-claims it reviewed documents it did not write. And when it is time to pick the next slice, the runner
-answers rather than the model:
+The earlier phases are recorded as pre-existing, with your explicit receipt against each one. The
+workflow never claims it reviewed a document it did not write.
+
+When it is time to pick the next slice, the runner answers rather than the model:
 
 ```text
-python3 <RUNNER> project-init next-slice --plan-dir docs/plan
+python3 <RUNNER> project-init next-slice
 ```
 
-It returns the first pending slice whose dependencies are completed, or tells you exactly which
-slices are blocked and on what.
+It returns the first pending slice whose dependencies are all completed, or names exactly which
+slices are blocked and on what. Without `--plan-dir` it uses the plan directory from
+`truedev.project.json`.
 
 ## Where state lives
 
