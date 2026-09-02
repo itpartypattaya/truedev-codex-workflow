@@ -196,6 +196,17 @@ def validate_evidence_is_current(manifest: dict[str, Any]) -> None:
         f"benchmark evidence was produced for {recorded!r} but this release is "
         f"{manifest['version']!r}; rerun the eval suite from the release SHA",
     )
+    commit = metadata.get("source_commit")
+    require(
+        isinstance(commit, str) and commit and commit != "unknown",
+        "benchmark evidence must record the commit that produced it",
+    )
+    assert isinstance(commit, str)
+    require(
+        not commit.endswith("-dirty"),
+        f"benchmark evidence was produced from a modified working tree ({commit}); "
+        "rerun the eval suite from a clean checkout of the release SHA",
+    )
 
 
 def validate_no_legacy_host_text() -> None:

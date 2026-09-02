@@ -4,6 +4,21 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.10] — 2026-09-02
+
+### Fixed
+- Benchmark provenance records a modified working tree, and the release gate refuses evidence
+  produced from one. A commit id alone was not provenance: a run made with uncommitted edits
+  claimed the commit it started from and so described neither that tree nor any released artifact.
+- `lifecycle` resume now says where the task itself comes from. The restored summary carries enum
+  values only, so narrowing attention to `references/steps.md` left the agent without the slice, its
+  acceptance criteria, or the documents they reference.
+
+### Changed
+- The `positive-lifecycle-compact-resume` assertion listing the injected-context allowlist named four
+  fields; the shipped contract has carried five since the validated slice reference was added, so the
+  assertion matched no released version.
+
 ## [1.1.9] — 2026-09-01
 
 ### Security

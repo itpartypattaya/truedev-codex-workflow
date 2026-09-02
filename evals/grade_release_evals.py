@@ -26,11 +26,22 @@ def _manifest_version() -> str:
 
 
 def _source_commit() -> str:
-    """Record which tree produced this evidence, so staleness is detectable later."""
+    """Record which tree produced this evidence, so staleness is detectable later.
+
+    A commit id alone is not provenance: evidence produced with edits in the working
+    tree describes neither that commit nor any released artifact, so say so.
+    """
     result = subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True
     )
-    return result.stdout.strip() if result.returncode == 0 else "unknown"
+    if result.returncode != 0:
+        return "unknown"
+    commit = result.stdout.strip()
+    status = subprocess.run(
+        ["git", "-C", str(ROOT), "status", "--porcelain"], capture_output=True, text=True
+    )
+    dirty = status.returncode != 0 or bool(status.stdout.strip())
+    return commit + "-dirty" if dirty else commit
 
 
 def load_runs(workspace: Path) -> list[dict[str, Any]]:
