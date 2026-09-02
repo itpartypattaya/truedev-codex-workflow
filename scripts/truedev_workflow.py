@@ -1288,6 +1288,32 @@ def _makefile_target(root: Path, name: str) -> str | None:
     return f"make {name}" if re.search(rf"(?m)^{re.escape(name)}\s*:", text) else None
 
 
+PYTHON_MARKERS = (
+    "pyproject.toml", "setup.py", "setup.cfg", "tox.ini", "Pipfile", "poetry.lock",
+    "pytest.ini", "ruff.toml", ".ruff.toml", ".flake8", "conftest.py",
+)
+
+
+def _python_markers(root: Path) -> list[Path]:
+    """Every file that says this is a Python project, in a stable order."""
+    found = [root / name for name in PYTHON_MARKERS if (root / name).is_file()]
+    try:
+        found.extend(sorted(path for path in root.glob("requirements*.txt") if path.is_file()))
+    except OSError:
+        pass
+    if not found and _has_unittest_layout(root):
+        found.append(root / "tests")
+    return found
+
+
+def _has_unittest_layout(root: Path) -> bool:
+    tests = root / "tests"
+    try:
+        return tests.is_dir() and not _is_link(tests) and any(tests.glob("test_*.py"))
+    except OSError:
+        return False
+
+
 def detect_project(root: Path) -> dict[str, Any]:
     """Describe how the repository builds, lints, and tests itself, without guessing.
 
@@ -1338,16 +1364,21 @@ def detect_project(root: Path) -> dict[str, Any]:
         has_ui = bool(dependencies & {"react", "vue", "svelte", "next", "nuxt", "@angular/core", "solid-js"})
         if dependencies & {"telegraf", "grammy", "node-telegram-bot-api", "telegram"}:
             domain, integration = "telegram-bot", "gramjs"
-    elif any((root / name).is_file() for name in ("pyproject.toml", "setup.cfg", "tox.ini", "requirements.txt")):
+    elif _python_markers(root):
         stack = "python"
-        config_files = [root / name for name in ("pyproject.toml", "setup.cfg", "tox.ini", "requirements.txt")]
+        config_files = _python_markers(root)
         if any(_mentions(path, "pytest") for path in config_files) or any(
             (root / name).is_file() for name in ("conftest.py", "pytest.ini", "tests/conftest.py")
         ):
             commands["test"] = "pytest"
-        if _mentions(root / "pyproject.toml", "ruff"):
+        elif _has_unittest_layout(root):
+            # stdlib discovery works wherever this layout exists; nothing is installed for it.
+            commands["test"] = "python -m unittest discover -s tests"
+        if any(_mentions(path, "ruff") for path in config_files) or any(
+            (root / name).is_file() for name in ("ruff.toml", ".ruff.toml")
+        ):
             commands["lint"] = "ruff check ."
-        elif any(_mentions(path, "flake8") for path in config_files):
+        elif any(_mentions(path, "flake8") for path in config_files) or (root / ".flake8").is_file():
             commands["lint"] = "flake8"
         if any(_mentions(path, "aiogram", "python-telegram-bot", "pyrogram", "telethon") for path in config_files):
             domain, integration = "telegram-bot", "telethon"
@@ -1390,7 +1421,11 @@ def detect_project(root: Path) -> dict[str, Any]:
     }
     has_phases = any((root / "docs" / "plan").glob("phase-*.md")) if (root / "docs" / "plan").is_dir() else False
     has_source = stack != "unknown" or any(
-        (root / name).is_dir() for name in ("src", "app", "lib", "pkg", "cmd", "internal", "server", "client", "packages", "services")
+        (root / name).is_dir()
+        for name in (
+            "src", "app", "lib", "pkg", "cmd", "internal", "server", "client",
+            "packages", "services", "scripts", "tests",
+        )
     )
     if has_phases:
         entry = "DECOMPOSITION"

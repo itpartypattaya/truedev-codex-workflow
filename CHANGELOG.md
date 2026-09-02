@@ -19,7 +19,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
   requirements and a PRD it already had, or skip phases with no record of who decided that.
 - `project-init next-slice` answers which slice is ready, with the blocked ones and their
   unmet dependencies. Slice selection was prose in the skill that hardcoded `docs/plan/`, so a
-  custom plan directory was invisible and a blocked dependency was one misreading away.
+  custom plan directory was invisible and a blocked dependency was one misreading away. Both slice
+  commands now take the plan directory from the project file when no flag is given.
 
 ### Fixed
 - The non-Git fallback for locating a state root now stops at the home directory. A forgotten

@@ -151,6 +151,22 @@ class DetectTests(WorkflowFixture):
         self.assertTrue(result["plan"]["native"])
         self.assertEqual(result["plan"]["candidates"], [])
 
+    def test_a_python_repository_without_a_manifest_is_still_python(self) -> None:
+        write(self.root / "requirements-ci.txt", "ruff==0.15.16\n")
+        write(self.root / "tests" / "test_thing.py", "def test_thing():\n    assert True\n")
+        result = workflow.detect_project(self.root)
+        self.assertEqual(result["stack"], "python")
+        self.assertEqual(result["commands"]["lint"], "ruff check .")
+        self.assertEqual(result["commands"]["test"], "python -m unittest discover -s tests")
+        self.assertTrue(result["has_source_code"])
+        self.assertIsNone(result["test_setup"])
+
+    def test_pytest_still_wins_over_the_stdlib_fallback(self) -> None:
+        write(self.root / "pyproject.toml", "[tool.pytest.ini_options]\n")
+        write(self.root / "tests" / "test_thing.py", "def test_thing():\n    assert True\n")
+        result = workflow.detect_project(self.root)
+        self.assertEqual(result["commands"]["test"], "pytest")
+
     def test_detect_never_fails_on_an_empty_repository(self) -> None:
         code, output, error = self.cli("detect")
         self.assertEqual(code, 0, error)
@@ -250,7 +266,14 @@ class ProjectConfigTests(WorkflowFixture):
 
     def test_read_only_commands_are_allowed_at_an_open_gate(self) -> None:
         self.open_gate(self.root)
-        for tail in ("detect", "project-config show", "project-init next-slice --plan-dir docs/plan"):
+        tails = (
+            "detect",
+            "project-config show",
+            "project-init next-slice",
+            "project-init next-slice --plan-dir docs/plan",
+            "project-init validate-slices",
+        )
+        for tail in tails:
             with self.subTest(tail=tail):
                 _, output = self.hook("pre-tool", {
                     "cwd": str(self.root), "tool_name": "Bash",
