@@ -36,6 +36,9 @@ change.
   file without `--overwrite`.
 - Run `detect` to propose values; it only reads the repository and prints JSON. Present what it found
   and let the user correct it before writing.
+- This file replaces guessing, not reading. Keep reading the project's own command sources — its
+  `Makefile`, package manifest, and CI configuration — and name them as evidence; the confirmed file
+  is what you run, not what you looked at.
 - A `null` command is an answer, not a gap to fill. Report the layer as absent and never substitute a
   guessed command such as `npm test` for a project that has none.
 - `project-config show` exits 2 when the file is absent. That is the signal to run `detect` and ask,

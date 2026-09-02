@@ -63,8 +63,10 @@ state file manually.
 
 1. Run `<PYTHON> <RUNNER> --help` and stop if the required runner cannot start. A missing interpreter
    means hook enforcement is unavailable; do not create active state and imply gates are enforced.
-2. Read the nearest applicable `AGENTS.md`, the selected slice, and `project-config show` for the
-   project's own build, lint, test, and E2E commands. These are reads; they change nothing.
+2. Read the nearest applicable `AGENTS.md`, the selected slice, and the repository's own command
+   sources — its `Makefile`, package manifest, and CI configuration — then run `project-config show`
+   for the commands the user has already confirmed. These are reads; they change nothing. Name every
+   file you actually read: the confirmed configuration replaces guessing, not reading the project.
    Record only successful reads; follow the CONTEXT_CHECK evidence rules in `references/steps.md`.
 3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
    instead of stashing, resetting, committing, or deleting it.
