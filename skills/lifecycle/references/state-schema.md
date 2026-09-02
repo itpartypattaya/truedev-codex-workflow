@@ -25,7 +25,8 @@ an OS advisory lock and validates these invariants before every atomic replace:
   and never satisfy the branch guard; a workflow already bound to one stays blocked until it is
   recovered onto a named branch or abandoned.
 - `awaiting_compact` is boolean and is cleared by a validated compact-session hook or an explicit
-  `release-compact --user-confirmed` receipt when the host event is unavailable.
+  `skip-compact --user-confirmed` receipt when the host event is unavailable. That receipt is kept
+  and `status` prints it, so a deliberate bypass stays visible for the rest of the run.
 - History contains transition metadata, not free-form prompts or repository content.
 - Stored text contains no line breaks, so a status field cannot fabricate another one.
 - `head_sha` records the commit the workflow started from. It never blocks a transition; `status`

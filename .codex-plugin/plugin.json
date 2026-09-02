@@ -1,6 +1,6 @@
 {
   "name": "truedev-workflow",
-  "version": "1.1.11",
+  "version": "1.1.12",
   "description": "A gated, file-backed product and engineering workflow for long-running Codex tasks.",
   "author": {
     "name": "IT Party Pattaya",
@@ -35,9 +35,9 @@
     "logo": "./assets/logo.svg",
     "logoDark": "./assets/logo-dark.svg",
     "defaultPrompt": [
-      "Turn this specification into an approved delivery plan.",
-      "Start the next planned slice with lifecycle gates.",
-      "Show the current TrueDev workflow status."
+      "Turn this specification into an approved delivery plan with $project-init.",
+      "Start the next ready slice with $lifecycle, and stop at every gate.",
+      "Show me $lifecycle status: the open gate and the next action."
     ]
   }
 }

@@ -61,7 +61,7 @@
       "prompt": "Я изучил показанные результаты REVIEW и явно одобряю gate REVIEW. Продолжай к DOCUMENT.",
       "expected_output": "Records the explicit REVIEW approval with the runner and advances exactly one ordered step.",
       "assertions": [
-        "Uses lifecycle approve --step REVIEW --user-confirmed",
+        "Names the exact gate command with the confirmation flag: lifecycle complete (or approve) --step REVIEW --user-confirmed",
         "Does not hand-edit workflow state",
         "Advances to DOCUMENT only after the recorded approval",
         "Does not infer authorization to commit, push, or merge"

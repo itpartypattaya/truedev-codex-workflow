@@ -37,7 +37,7 @@ the user's repository.
 - **next slice:** run `project-init next-slice [--plan-dir <plan-dir>]` and hand the file it names
   to `$lifecycle`. Report its `reason` and `blocked` list when it exits non-zero.
 - **approve `<PHASE>`:** only after the latest user message explicitly approves the exact phase,
-  run `project-init approve --phase <PHASE> --user-confirmed`.
+  run `project-init complete --phase <PHASE> --user-confirmed`.
 - **continue/resume:** validate state and read only the active phase in
   `<SKILL_DIR>/references/phases.md`.
 - **invalid or obsolete state:** infer nothing and do not fabricate approvals. Offer
@@ -68,6 +68,23 @@ python3 <RUNNER> project-init start --project "<name>" --spec "<source>" \
 7. Execute the entry phase using its contract in `references/phases.md`, write the proposed
    artifact, present open questions, then open its gate.
 
+## Commands
+
+`approve` and `complete` are the same command; prefer `complete` when speaking to the user.
+
+| Command | What it does |
+| --- | --- |
+| `project-init start --project "<name>" --spec "<source>"` | Begin at `INPUT_VALIDATION` |
+| `project-init start ... --from <PHASE> --user-confirmed` | Begin later, adopting the phases whose artifacts already exist |
+| `project-init status` | Which phase you are on, the open gate, and the one next action |
+| `project-init gate --phase <PHASE>` | Present the artifact and stop |
+| `project-init complete --phase <PHASE> --user-confirmed` | The user's approval of that exact phase |
+| `project-init finish --phase FINALIZE` | Close the last phase |
+| `project-init validate-slices [--plan-dir <plan-dir>]` | Check the decomposition before handing it over |
+| `project-init next-slice [--plan-dir <plan-dir>]` | The first slice whose dependencies are all completed |
+| `project-init abandon --user-confirmed` | Archive the original state and clear the workflow |
+| `project-init archive` | Close out and hand the first approved slice to `$lifecycle` |
+
 ## Transition commands
 
 ```text
@@ -75,7 +92,7 @@ python3 <RUNNER> project-init status
 python3 <RUNNER> project-init validate
 python3 <RUNNER> project-init finish --phase FINALIZE
 python3 <RUNNER> project-init gate --phase <USER_PHASE>
-python3 <RUNNER> project-init approve --phase <USER_PHASE> --user-confirmed
+python3 <RUNNER> project-init complete --phase <USER_PHASE> --user-confirmed
 python3 <RUNNER> project-init validate-slices --plan-dir docs/plan
 python3 <RUNNER> project-init next-slice --plan-dir docs/plan
 python3 <RUNNER> project-init abandon --user-confirmed

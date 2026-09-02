@@ -4,6 +4,24 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.12] — 2026-09-02
+
+### Added
+- `status` now names the open gate and the single next action, so reading it does not require
+  working out which command applies to the step it just printed. That inference is where a run
+  talks itself into approving its own gate.
+- A deliberate compact bypass stays visible: `status` prints `compact_released: before <STEP> at
+  <time>` for the rest of the run. The receipt was already recorded and nothing displayed it.
+
+### Changed
+- One vocabulary across the runner, both skills, and the README. `complete` is accepted wherever
+  `approve` was, and `skip-compact` wherever `release-compact` was, with one implementation and
+  one receipt behind each pair. Both spellings pass the gate allowlist; the documentation and the
+  status line use the second of each pair. The words a person reads are now the words the gate
+  accepts.
+- User gates are marked `[GATE]` in the step table rather than trailing `user-gate`.
+- Both skills carry a command table, and the suggested prompts speak the same vocabulary.
+
 ## [1.1.11] — 2026-09-02
 
 ### Added

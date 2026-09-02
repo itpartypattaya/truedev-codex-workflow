@@ -41,7 +41,7 @@ the evidence presented to the user.
 5. Synchronize the Codex plan, finish PLAN, and ask the user to compact before implementation. The
    runner sets `awaiting_compact`; the SessionStart hook clears it after a real compact event. If the
    host never emits that event, present the limitation and require explicit user confirmation before
-   `lifecycle release-compact --user-confirmed`.
+   `lifecycle skip-compact --user-confirmed`.
 
 ## COMPONENTS — user gate
 
