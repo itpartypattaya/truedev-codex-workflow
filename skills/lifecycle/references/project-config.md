@@ -40,4 +40,7 @@ change.
   guessed command such as `npm test` for a project that has none.
 - `project-config show` exits 2 when the file is absent. That is the signal to run `detect` and ask,
   not to proceed on assumptions.
-- Both commands are read-only enough to run while a gate is open; `project-config init` is not.
+- `detect` and `project-config show` are read-only and stay available while a gate is open;
+  `project-config init` writes and is blocked there.
+- Write the file after the clean-tree preflight, never before it. It is a task-owned change, and
+  creating it first makes `git-preflight --require-clean` fail on the workflow's own edit.

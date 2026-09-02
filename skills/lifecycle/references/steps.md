@@ -12,7 +12,9 @@ the evidence presented to the user.
 2. Run the bundled `git-preflight --require-clean` before branch or worktree changes.
 3. Load the project's commands with `project-config show`. If it exits 2, run `detect`, present the
    detected stack and commands, and write them with `project-config init ... --user-confirmed` only
-   after the user confirms. A `null` command marks an absent layer, not a command to invent.
+   after the user confirms. Do this after the preflight, never before: the file is a task-owned
+   change, and writing it first makes the clean-tree check fail on the workflow's own edit. A `null`
+   command marks an absent layer, not a command to invent.
 4. Confirm the slice dependencies are completed and the task does not overlap unrelated work.
 5. Record any unavailable validation layers. Do not treat them as passed.
 6. Finish `CONTEXT_CHECK` through the runner.

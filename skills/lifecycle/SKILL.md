@@ -63,33 +63,35 @@ state file manually.
 
 1. Run `<PYTHON> <RUNNER> --help` and stop if the required runner cannot start. A missing interpreter
    means hook enforcement is unavailable; do not create active state and imply gates are enforced.
-2. Read the nearest applicable `AGENTS.md`, the selected slice, and `truedev.project.json` for the
-   project's own build, lint, test, and E2E commands. If that file is absent, run `detect`, show the
-   user what was found, and write it with `project-config init ... --user-confirmed` only after the
-   user confirms those commands. Never write the file without asking, and never fall back to a
-   guessed stack. See `references/project-config.md`. Record only successful reads; follow the
-   CONTEXT_CHECK evidence rules in `references/steps.md`.
+2. Read the nearest applicable `AGENTS.md`, the selected slice, and `project-config show` for the
+   project's own build, lint, test, and E2E commands. These are reads; they change nothing.
+   Record only successful reads; follow the CONTEXT_CHECK evidence rules in `references/steps.md`.
 3. Run `git-preflight --require-clean`. A dirty tree may contain user work; stop and agree ownership
    instead of stashing, resetting, committing, or deleting it.
-4. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
+4. Only now, if `truedev.project.json` was missing, run `detect`, show the user what it found, and
+   write the file with `project-config init ... --user-confirmed` after the user confirms the
+   commands. This order is not optional: the file is a task-owned change, and writing it before the
+   clean-tree preflight would make that preflight fail on the workflow's own edit. Never write it
+   without asking, and never fall back to a guessed stack. See `references/project-config.md`.
+5. Ensure `.truedev-workflow/` is ignored by Git. If it is missing, add the narrow ignore rule as a
    task-owned change; never start with tracked or potentially committable state.
-5. Detect the default branch only from a valid `origin/HEAD`. If Git cannot identify it
+6. Detect the default branch only from a valid `origin/HEAD`. If Git cannot identify it
    authoritatively, obtain an explicit `--base` from the user; never infer `main`, `master`, or the
    current branch, and do not pull automatically.
-6. For implementation work, create a dedicated local branch or worktree only when this is within the
+7. For implementation work, create a dedicated local branch or worktree only when this is within the
    user's request. Never switch branches across unrelated user changes.
-7. Run:
+8. Run:
 
 ```text
 python3 <RUNNER> lifecycle start --task "<task>" --slice "<plan-dir>/slice-NNN-name.md"
 ```
 
 `--slice` is a repository-relative path. It may use the default `docs/plan/` directory or the same
-custom plan directory passed to `project-init validate-slices --plan-dir`. Each directory component
+custom plan directory recorded as `plan_dir` in `truedev.project.json`. Each directory component
 must contain only ASCII letters, digits, `.`, `_`, or `-`, because this validated reference is restored
 after context compaction.
 
-8. Keep Codex's task plan synchronized with the current workflow step when a plan tool is available.
+9. Keep Codex's task plan synchronized with the current workflow step when a plan tool is available.
 
 ## Transition commands
 

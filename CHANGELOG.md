@@ -28,6 +28,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
   in a sibling project was gated by a workflow the user had abandoned months earlier.
 - `--resume` no longer discards baseline eval runs when skill text changes. The baseline is
   instructed not to read the skill, so its answer cannot depend on it.
+- Adopting the project description is ordered after the clean-tree preflight in both the skill and
+  the step playbook. The two documents disagreed, and the earlier order wrote a task-owned file and
+  then failed the preflight on that same file.
 
 ## [1.1.10] — 2026-09-02
 
