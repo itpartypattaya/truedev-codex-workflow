@@ -204,6 +204,7 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
                 "eval_name": run["eval_id"].replace("-", " ").title(),
                 "configuration": run["configuration"],
                 "run_number": 1,
+                "executed_at": timing.get("executor_start"),
                 "result": {
                     "pass_rate": grading["summary"]["pass_rate"],
                     "passed": passed,
@@ -248,6 +249,11 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
     notes.append(
         f"With-skill added {delta_time:.1f}s and {delta_tokens:.0f} tokens on average across one run per case."
     )
+    notes.append(
+        "Each run carries executed_at. A run whose inputs were unchanged is reused rather than "
+        "re-executed, so a run may predate the recorded commit; the baseline configuration is told "
+        "not to read the skill and does not depend on it."
+    )
     return {
         "metadata": {
             "skill_name": "truedev-workflow",
@@ -259,6 +265,10 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
             "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
             "evals_run": [item["id"] for item in load_evals()],
             "runs_per_configuration": 1,
+            "oldest_run": min(
+                (str(run["executed_at"]) for run in benchmark_runs if run.get("executed_at")),
+                default=None,
+            ),
         },
         "runs": benchmark_runs,
         "run_summary": summary,
