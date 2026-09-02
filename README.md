@@ -237,6 +237,47 @@ request carries no identifiers and no repository information; it asks a public f
 is. A failure is silent — a version notice must never be able to break a session. `PRIVACY.md` has
 the full detail.
 
+### The four hook wirings
+
+| Hook event | What it does |
+| --- | --- |
+| `SessionStart(compact)` | Clears the compact checkpoint and injects a small allowlisted summary of the workflow state |
+| `SessionStart(startup\|resume)` | Reports a stale install. Carries no enforcement at all — see [Updates](#updates) |
+| `PreToolUse(Bash\|apply_patch\|Edit\|Write\|Agent\|spawn_agent\|mcp__.*)` | Refuses matching tool calls while a gate is open, except the runner's own read-only commands |
+| `Stop` | Validates the state at the end of a turn, so a run cannot walk away from a step mid-flight |
+
+### What the hooks do not enforce
+
+Worth being precise, because the whole pitch is that hooks beat prompts:
+
+- **The runner writes the state, not the model.** That is the main difference from a prompt-only
+  workflow: a transition has to pass validation before it is written, so a step cannot quietly
+  demote its own gate. What a model can still do is claim in prose that it ran a check it did not
+  run — the state records the transition, not the truth of the work behind it.
+- **The pre-tool hook sees only what the host reports.** Hosted tools and specialized tool paths
+  may emit no hook event at all, and a matcher that covered every tool would cost roughly half a
+  second on each call. What is matched is blocked while a gate is open; what is not matched was
+  never claimed to be.
+- **`Bash` is matched, but the runner's own read-only commands pass.** That allowlist is the
+  reason evidence can still be gathered at an open gate. It matches whole commands, so an
+  argument cannot smuggle a second one past it.
+- **Everything below the hook layer is prose.** What TEST writes and how REVIEW stages are
+  instructions to a model. The hooks bound the sequence, not the content.
+- **Anything with write access can turn it off.** Deleting `.truedev-workflow/` ends enforcement.
+  That is the intended way out, not a hole to plug. A damaged state file fails closed instead;
+  no state file at all means the plugin does nothing.
+
+Repository permissions, sandboxing, protected branches, CI, and provider-side authorization
+remain the real boundary. This makes a long task survive a long session; it is not a security
+control.
+
+### What it costs you in context
+
+The two skill descriptions are what a session always carries, because that is what the model
+reads to decide whether a skill applies: **about 1,000 characters, roughly 255 tokens**. The
+hooks cost nothing in context — they run in the harness, not in the model. Invoking a skill loads
+its instructions, which is where the real cost sits, and only when you actually use it.
+
 ## Git safety
 
 The workflow never pulls, stages everything, commits, pushes, opens or merges a PR, deletes a
