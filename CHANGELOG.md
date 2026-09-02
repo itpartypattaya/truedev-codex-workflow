@@ -4,6 +4,22 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.15] — 2026-09-02
+
+### Added
+- `lifecycle recover --rebuild --task <task> --user-confirmed` recreates a lost or unusable state
+  file. A repository can outlive its state — a stray delete, a fresh checkout, a different machine
+  — and until now the only route back was to start over and lose the recorded task.
+- The bytes it replaces are archived as `before-rebuild` under `.truedev-workflow/history/` before
+  anything is written, so an unusable state file is still the only record of what happened.
+
+### Changed
+- The rebuild puts every user gate back at pending and restarts at the first step. Commits and
+  touched test files show that work happened, never that anyone approved it; an over-generous
+  reconstruction would retire the remaining gates in silence, which is worse than repeating them.
+- `--rebuild` and `--accept-current-branch` are mutually exclusive, and `--rebuild` stays out of the
+  gate allowlist because it writes — unlike the branch rebinding, it cannot run while a gate is open.
+
 ## [1.1.14] — 2026-09-02
 
 ### Added

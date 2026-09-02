@@ -77,14 +77,14 @@ released and a clean checkout that produced it. Rerun the suite whenever the ski
 change; `--resume` reuses only the runs whose inputs still match. Do not submit numbers produced for
 another version, or from a modified working tree.
 
-Upload `dist/truedev-workflow-1.1.14.zip` as **Skills only** after running a fresh installed-plugin
+Upload `dist/truedev-workflow-1.1.15.zip` as **Skills only** after running a fresh installed-plugin
 smoke test from the exact release SHA.
 
 ## Publisher-owned steps
 
 These cannot be proven by repository tests:
 
-- merge the release commit into `main`, publish the legal URLs, and tag `v1.1.14`;
+- merge the release commit into `main`, publish the legal URLs, and tag `v1.1.15`;
 - install the final package in a fresh Codex task and review/trust the hook hash;
 - confirm the two skills and three hooks load from the installed copy;
 - run the eight reviewer cases and retain outputs from the final release SHA;

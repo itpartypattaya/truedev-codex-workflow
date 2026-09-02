@@ -154,6 +154,7 @@ The skills run these for you. `<RUNNER>` is the bundled script at
 | `lifecycle complete --step <STEP> --user-confirmed` | Your approval on a user gate. The only thing that clears one |
 | `lifecycle skip-compact --user-confirmed` | Continue without compacting, on purpose. Recorded, and shown by `status` afterwards |
 | `lifecycle recover --accept-current-branch --user-confirmed` | Rebind a workflow whose branch changed underneath it |
+| `lifecycle recover --rebuild --task <task> --user-confirmed` | Recreate a lost state file. Starts the steps over; every gate comes back pending |
 | `lifecycle abandon --user-confirmed` | Keep the original state in history and start clean |
 | `detect` / `project-config show` | What this repository is, and the commands you confirmed |
 
@@ -173,6 +174,13 @@ If the state file is damaged, matching tool calls fail closed until you fix it. 
 --user-confirmed` saves the original bytes before clearing the workflow. If the branch changed under
 a valid workflow, `recover --accept-current-branch --user-confirmed` rebinds it. With no active
 state, the plugin does nothing at all.
+
+A repository can also outlive its state file — a stray delete, a fresh checkout, a different
+machine. `recover --rebuild --task <task> --user-confirmed` recreates it, and puts the gates back at
+the beginning rather than guessing how far the run had got. Your commits and your touched test files
+show that work happened; they never show that you approved it. Anything that reconstructed
+approvals from them would retire the remaining gates without you ever seeing them. The bytes of the
+old state, if any survived, are kept under `.truedev-workflow/history/`.
 
 ## What the gates actually enforce
 

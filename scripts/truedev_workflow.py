@@ -867,21 +867,16 @@ def require_state_ignored(root: Path, workflow: str) -> None:
             )
 
 
-@_lock_workflow("lifecycle")
-def lifecycle_start(args: argparse.Namespace) -> int:
-    root = _repo_root_or_error()
-    path = state_path(root, "lifecycle")
-    if path.exists():
-        raise WorkflowError(f"an active lifecycle already exists: {path}")
-    require_state_ignored(root, "lifecycle")
-    now = utc_now()
+def _new_lifecycle_state(root: Path, args: argparse.Namespace) -> dict[str, Any]:
+    """Build a fresh lifecycle state; `start` and `recover --rebuild` share it."""
     branch = current_branch(root)
     if branch == DETACHED_HEAD:
         raise WorkflowError("detached HEAD is not supported by lifecycle start; switch to a named branch")
     if branch in BRANCH_SENTINELS:
         raise WorkflowError(f"lifecycle start requires a named branch, but Git reported {branch}")
+    now = utc_now()
     slice_ref = _validate_slice_ref(args.slice) if args.slice is not None else None
-    state: dict[str, Any] = {
+    return {
         "schema_version": SCHEMA_VERSION,
         "workflow": "lifecycle",
         "repo_root": str(root),
@@ -897,6 +892,16 @@ def lifecycle_start(args: argparse.Namespace) -> int:
         "steps": _new_steps(LIFECYCLE_STEPS, LIFECYCLE_USER_GATES),
         "history": [],
     }
+
+
+@_lock_workflow("lifecycle")
+def lifecycle_start(args: argparse.Namespace) -> int:
+    root = _repo_root_or_error()
+    path = state_path(root, "lifecycle")
+    if path.exists():
+        raise WorkflowError(f"an active lifecycle already exists: {path}")
+    require_state_ignored(root, "lifecycle")
+    state = _new_lifecycle_state(root, args)
     _history(state, "start", LIFECYCLE_STEPS[0], "codex")
     save_state(root, "lifecycle", state)
     print(f"Started lifecycle for {args.task!r} on branch {state['branch']!r}.")
@@ -1106,6 +1111,43 @@ def recover_lifecycle_branch(*, accept_current_branch: bool, user_confirmed: boo
     _history(state, "recover", state["current_step"], "user-explicit")
     save_state(root, "lifecycle", state)
     print(f"Recovered lifecycle branch {previous!r} -> {active!r}; original state: {destination}")
+    return 0
+
+
+@_lock_workflow("lifecycle")
+def rebuild_lifecycle(args: argparse.Namespace) -> int:
+    """Recreate a lost or unusable state file. Nothing on disk proves an approval.
+
+    A repository can outlive its state file: a stray delete, a fresh checkout, a
+    different machine. Without this the slice is stranded — with no state the plugin
+    is inert, so the gates that were protecting the work simply stop existing, and the
+    only route back was to start over and lose the recorded task. The rebuild puts the
+    gates back at the beginning rather than inferring how far the run had got: commits
+    and touched test files show that work happened, never that anyone approved it, and
+    an over-generous reconstruction retires every remaining gate in silence.
+    """
+    if not args.user_confirmed:
+        raise WorkflowError(
+            "rebuilding restarts the step sequence and keeps no approvals; it requires "
+            "--user-confirmed after the user has been shown what will be rebuilt"
+        )
+    if not args.task:
+        raise WorkflowError("rebuilding requires --task, because the lost state held it")
+    root = _repo_root_or_error()
+    require_state_ignored(root, "lifecycle")
+    archived: Path | None = None
+    if _state_is_present(state_path(root, "lifecycle")):
+        # Unusable, but still the only record of what happened. Keep the bytes.
+        archived = _archive_raw_state(root, "lifecycle", "before-rebuild")
+    state = _new_lifecycle_state(root, args)
+    _history(state, "rebuild", LIFECYCLE_STEPS[0], "user-explicit")
+    save_state(root, "lifecycle", state)
+    origin = f"; previous state kept at {archived}" if archived is not None else ""
+    print(
+        f"Rebuilt lifecycle for {args.task!r} on branch {state['branch']!r} at "
+        f"{LIFECYCLE_STEPS[0]}; every user gate is pending because no artifact proves "
+        f"an approval{origin}."
+    )
     return 0
 
 
@@ -2297,10 +2339,17 @@ def build_parser() -> argparse.ArgumentParser:
     skip.add_argument("--reason", required=True, choices=("non-ui",))
     skip.set_defaults(func=lifecycle_skip_components)
     recover = lifecycle_sub.add_parser("recover")
-    recover.add_argument("--accept-current-branch", action="store_true")
+    recover_mode = recover.add_mutually_exclusive_group()
+    recover_mode.add_argument("--accept-current-branch", action="store_true")
+    recover_mode.add_argument("--rebuild", action="store_true")
+    recover.add_argument("--task")
+    recover.add_argument("--slice")
+    recover.add_argument("--base")
     recover.add_argument("--user-confirmed", action="store_true")
     recover.set_defaults(
-        func=lambda args: recover_lifecycle_branch(
+        func=lambda args: rebuild_lifecycle(args)
+        if args.rebuild
+        else recover_lifecycle_branch(
             accept_current_branch=args.accept_current_branch, user_confirmed=args.user_confirmed
         )
     )
