@@ -41,6 +41,14 @@ def codex_command() -> list[str]:
 # 0.146.1 and 0.152.1 and halved the executor's output, which reads as a skill regression.
 REASONING_EFFORT = "medium"
 
+# 0.152.1 stopped treating an arbitrary `pwsh -Command` as self-evidently safe. `exec` runs with
+# nobody to ask, so every such command was auto-denied: the executor could not read one skill file,
+# and the benchmark measured a blind run instead of the skill. `--approve-for-me` routes that
+# decision to an automatic reviewer. The sandbox stays read-only, and both are named here rather
+# than left to a CLI default, because a default is what changed under us last time.
+SANDBOX_MODE = "read-only"
+APPROVAL_ROUTING = "--approve-for-me"
+
 
 @functools.lru_cache(maxsize=1)
 def executor_identity() -> str:
@@ -62,10 +70,16 @@ def executor_identity() -> str:
             check=False,
         )
     except (OSError, subprocess.SubprocessError, RuntimeError):
-        return f"unknown CLI, reasoning effort {REASONING_EFFORT}"
+        return (
+            f"unknown CLI, reasoning effort {REASONING_EFFORT}, "
+            f"sandbox {SANDBOX_MODE} with {APPROVAL_ROUTING}"
+        )
     version = result.stdout.strip() or result.stderr.strip()
     version = " ".join(version.split())[:120] or "unknown CLI"
-    return f"{version}, reasoning effort {REASONING_EFFORT}"
+    return (
+        f"{version}, reasoning effort {REASONING_EFFORT}, "
+        f"sandbox {SANDBOX_MODE} with {APPROVAL_ROUTING}"
+    )
 
 
 def load_evals() -> list[dict[str, Any]]:
@@ -206,8 +220,9 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
         "--ignore-user-config",
         "-c",
         f'model_reasoning_effort="{REASONING_EFFORT}"',
-        "--sandbox",
-        "read-only",
+        "-c",
+        f'sandbox_mode="{SANDBOX_MODE}"',
+        APPROVAL_ROUTING,
         "--skip-git-repo-check",
         "--json",
         "-C",
