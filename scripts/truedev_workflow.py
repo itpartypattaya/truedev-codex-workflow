@@ -93,8 +93,8 @@ SAFE_RUNNER_COMMAND = re.compile(
     r"file\s+--path\s+" + _VALUE + r")|"
     r"(?:lifecycle|project-init)\s+abandon\s+--user-confirmed|"
     r"lifecycle\s+recover\s+--accept-current-branch\s+--user-confirmed|"
-    r"lifecycle\s+release-compact\s+--user-confirmed|"
-    r"(?:lifecycle|project-init)\s+approve\s+(?:--(?:step|phase)\s+)?[A-Z_]+\s+--user-confirmed)\s*$"
+    r"lifecycle\s+(?:release-compact|skip-compact)\s+--user-confirmed|"
+    r"(?:lifecycle|project-init)\s+(?:approve|complete)\s+(?:--(?:step|phase)\s+)?[A-Z_]+\s+--user-confirmed)\s*$"
 )
 class WorkflowError(RuntimeError):
     """A user-actionable workflow validation error."""
@@ -1570,6 +1570,34 @@ def project_config_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _next_action(workflow: str, state: dict[str, Any]) -> str:
+    """Name the one command that moves this workflow, so status is actionable.
+
+    The table said what each step was doing and left the reader to work out which
+    command applied, which is the moment a run guesses and approves its own gate.
+    """
+    order, _, current_key = _definition(workflow)
+    if workflow == "lifecycle" and state.get("awaiting_compact"):
+        return "compact the session, or skip-compact --user-confirmed"
+    current = state[current_key]
+    status = state["steps"][current]["status"]
+    if status == "awaiting_approval":
+        return f"complete {current} --user-confirmed (only after the user approves it)"
+    if status == "completed" and current == order[-1]:
+        return "archive"
+    if state["steps"][current]["gate"] == "user":
+        return f"present the evidence, then gate {current}"
+    return f"finish {current}"
+
+
+def _open_gate(workflow: str, state: dict[str, Any]) -> str | None:
+    order, _, _ = _definition(workflow)
+    for name in order:
+        if state["steps"][name]["status"] == "awaiting_approval":
+            return name
+    return None
+
+
 def print_status(workflow: str) -> int:
     root = _repo_root_or_error()
     state = load_state(root, workflow)
@@ -1600,13 +1628,25 @@ def print_status(workflow: str) -> int:
             else:
                 print(f"head: {recorded_head}")
         print(f"awaiting_compact: {str(state['awaiting_compact']).lower()}")
+        released = [
+            entry
+            for entry in state.get("history", [])
+            if entry.get("action") == "release-compact"
+        ]
+        if released:
+            last = released[-1]
+            # A deliberate bypass is evidence, not an absence of evidence: say it happened.
+            print(f"compact_released: before {_one_line(str(last.get('name')))} at {_one_line(str(last.get('at')))}")
     else:
         print(f"project: {_one_line(state['project'])}")
         print(f"spec: {_one_line(state['spec'])}")
+    gate_name = _open_gate(workflow, state)
+    print(f"open_gate: {gate_name if gate_name is not None else 'none'}")
+    print(f"next_action: {_next_action(workflow, state)}")
     for name in order:
         item = state["steps"][name]
         marker = ">" if name == state[current_key] else " "
-        gate = " user-gate" if item["gate"] == "user" else ""
+        gate = " [GATE]" if item["gate"] == "user" else ""
         print(f"{marker} {name:<18} {item['status']}{gate}")
     return 0
 
@@ -2202,8 +2242,8 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--slice")
     start.add_argument("--base")
     start.set_defaults(func=lifecycle_start)
-    for action in ("gate", "finish", "approve"):
-        item = lifecycle_sub.add_parser(action)
+    for name, action in (("gate", "gate"), ("finish", "finish"), ("approve", "approve"), ("complete", "approve")):
+        item = lifecycle_sub.add_parser(name)
         item.add_argument("--step", required=True, choices=LIFECYCLE_STEPS)
         if action == "approve":
             item.add_argument("--user-confirmed", action="store_true")
@@ -2224,11 +2264,14 @@ def build_parser() -> argparse.ArgumentParser:
             accept_current_branch=args.accept_current_branch, user_confirmed=args.user_confirmed
         )
     )
-    release_compact = lifecycle_sub.add_parser("release-compact")
-    release_compact.add_argument("--user-confirmed", action="store_true")
-    release_compact.set_defaults(
-        func=lambda args: release_compact_gate(user_confirmed=args.user_confirmed)
-    )
+    # Two names, one implementation and one receipt: "skip-compact" is what the docs and
+    # the status line call it, "release-compact" is what earlier versions accepted.
+    for compact_name in ("release-compact", "skip-compact"):
+        release_compact = lifecycle_sub.add_parser(compact_name)
+        release_compact.add_argument("--user-confirmed", action="store_true")
+        release_compact.set_defaults(
+            func=lambda args: release_compact_gate(user_confirmed=args.user_confirmed)
+        )
     abandon = lifecycle_sub.add_parser("abandon")
     abandon.add_argument("--user-confirmed", action="store_true")
     abandon.set_defaults(func=lambda args: abandon_workflow("lifecycle", user_confirmed=args.user_confirmed))
@@ -2244,8 +2287,8 @@ def build_parser() -> argparse.ArgumentParser:
     project_start_parser.add_argument("--from", dest="from_phase", choices=PROJECT_PHASES[:-1])
     project_start_parser.add_argument("--user-confirmed", action="store_true")
     project_start_parser.set_defaults(func=project_start)
-    for action in ("gate", "finish", "approve"):
-        item = project_sub.add_parser(action)
+    for name, action in (("gate", "gate"), ("finish", "finish"), ("approve", "approve"), ("complete", "approve")):
+        item = project_sub.add_parser(name)
         item.add_argument("--phase", required=True, choices=PROJECT_PHASES)
         if action == "approve":
             item.add_argument("--user-confirmed", action="store_true")

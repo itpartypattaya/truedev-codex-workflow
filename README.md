@@ -88,7 +88,7 @@ After PLAN the lifecycle asks you to compact the Codex session, because the plan
 implementation should not carry it. Compacting clears that gate and hands the next session a short
 summary — the workflow name, the current step, its status, and the slice file. Your task text and
 raw state never make it into that summary. If your Codex build does not emit a compact event, you
-can release the gate deliberately with `lifecycle release-compact --user-confirmed`.
+can release the gate deliberately with `lifecycle skip-compact --user-confirmed`.
 
 ## Starting on a project that already exists
 
@@ -136,6 +136,29 @@ python3 <RUNNER> project-init next-slice
 It returns the first pending slice whose dependencies are all completed, or names exactly which
 slices are blocked and on what. Without `--plan-dir` it uses the plan directory from
 `truedev.project.json`.
+
+## Commands
+
+The skills run these for you. `<RUNNER>` is the bundled script at
+`<plugin-root>/scripts/truedev_workflow.py`.
+
+| Command | What it does |
+| --- | --- |
+| `project-init start --project <name> --spec <source>` | Spec → requirements → PRD → architecture → plan → slices |
+| `project-init start ... --from <PHASE> --user-confirmed` | Start partway, adopting what the repository already has |
+| `project-init status` | Which phase you are on, and the one next action |
+| `project-init complete --phase <PHASE> --user-confirmed` | Your approval on a phase gate. Without it the next phase does not start |
+| `project-init next-slice` | Which slice is ready, and why the others are not |
+| `lifecycle start --task <task> --slice <file>` | Preflight, then open a lifecycle for one slice |
+| `lifecycle status` | The step table, the open gate, and the one next action |
+| `lifecycle complete --step <STEP> --user-confirmed` | Your approval on a user gate. The only thing that clears one |
+| `lifecycle skip-compact --user-confirmed` | Continue without compacting, on purpose. Recorded, and shown by `status` afterwards |
+| `lifecycle recover --accept-current-branch --user-confirmed` | Rebind a workflow whose branch changed underneath it |
+| `lifecycle abandon --user-confirmed` | Keep the original state in history and start clean |
+| `detect` / `project-config show` | What this repository is, and the commands you confirmed |
+
+`approve` and `complete` are the same command, and so are `release-compact` and `skip-compact`.
+Both spellings work; the second of each pair is the one the documentation and `status` use.
 
 ## Where state lives
 

@@ -37,7 +37,7 @@ the user's repository.
   entries, and stop. Never choose a slice by listing the directory yourself, and never skip a
   blocked dependency.
 - **approve `<STEP>`:** only after the user's latest message explicitly approves that exact gate,
-  run `lifecycle approve --step <STEP> --user-confirmed`.
+  run `lifecycle complete --step <STEP> --user-confirmed`.
 - **ambiguous response at a user gate:** do not transition. Name the gate and ask the user to approve
   it or reject/request revisions to the presented evidence.
 - **continue/resume:** validate state, then recover the task itself from durable artifacts — the
@@ -54,7 +54,8 @@ the user's repository.
 - **invalid or obsolete state:** do not fabricate approvals. Offer `abandon --user-confirmed`, which
   preserves the original state in history before allowing a clean restart.
 - **compact event unavailable:** explain the missing host evidence and use
-  `release-compact --user-confirmed` only after the user explicitly accepts bypassing that checkpoint.
+  `skip-compact --user-confirmed` only after the user explicitly accepts bypassing that checkpoint.
+  Never run it on your own initiative to get past a block; `status` prints the bypass afterwards.
 
 If a runner command fails, report the error once. Do not retry by weakening validation or editing the
 state file manually.
@@ -95,6 +96,27 @@ after context compaction.
 
 9. Keep Codex's task plan synchronized with the current workflow step when a plan tool is available.
 
+## Commands
+
+One vocabulary, used in this file, in the README, and by the runner. `approve` and `complete`
+are the same command; so are `release-compact` and `skip-compact`. Prefer the second name of each
+pair when speaking to the user — it is the one the status line prints.
+
+| Command | What it does |
+| --- | --- |
+| `lifecycle start --task "<task>" --slice "<plan-dir>/slice-NNN-name.md"` | Open a lifecycle for one slice, after the preflight |
+| `lifecycle status` | Where this workflow is: the step table, the open gate, and the one next action |
+| `lifecycle gate --step <STEP>` | Present the evidence and stop at a user gate |
+| `lifecycle complete --step <STEP> --user-confirmed` | The user's approval of that exact gate. The only thing that clears one |
+| `lifecycle finish --step <STEP>` | Close an automatic step whose work is done |
+| `lifecycle skip --step COMPONENTS --reason non-ui` | Record that the slice has no UI surface |
+| `lifecycle skip-compact --user-confirmed` | The user's deliberate bypass of the compact checkpoint. Recorded, and printed by `status` afterwards |
+| `lifecycle recover --accept-current-branch --user-confirmed` | Rebind a valid workflow to the branch it is actually on |
+| `lifecycle abandon --user-confirmed` | Archive the original state and clear the workflow |
+| `lifecycle archive` | Close out an approved CLOSE and free the slot for the next slice |
+| `project-init next-slice [--plan-dir <plan-dir>]` | Which slice is ready, and why the others are not |
+| `detect` / `project-config show` | What the repository is, and the commands the user confirmed |
+
 ## Transition commands
 
 Use these commands; never represent a transition by hand-editing JSON:
@@ -104,10 +126,10 @@ python3 <RUNNER> lifecycle status
 python3 <RUNNER> lifecycle validate
 python3 <RUNNER> lifecycle finish --step <AUTO_STEP>
 python3 <RUNNER> lifecycle gate --step <USER_GATE>
-python3 <RUNNER> lifecycle approve --step <USER_GATE> --user-confirmed
+python3 <RUNNER> lifecycle complete --step <USER_GATE> --user-confirmed
 python3 <RUNNER> lifecycle skip --step COMPONENTS --reason non-ui
 python3 <RUNNER> lifecycle recover --accept-current-branch --user-confirmed
-python3 <RUNNER> lifecycle release-compact --user-confirmed
+python3 <RUNNER> lifecycle skip-compact --user-confirmed
 python3 <RUNNER> lifecycle abandon --user-confirmed
 python3 <RUNNER> lifecycle archive
 ```

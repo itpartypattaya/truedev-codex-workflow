@@ -4,6 +4,6 @@ interface:
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/logo.svg"
   brand_color: "#5B21B6"
-  default_prompt: "Use $lifecycle to start or continue the next planned slice safely."
+  default_prompt: "Use $lifecycle to start the next ready slice, or $lifecycle status to see the open gate."
 policy:
   allow_implicit_invocation: true
