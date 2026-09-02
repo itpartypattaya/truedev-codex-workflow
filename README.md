@@ -179,8 +179,7 @@ steps only the account owner can perform are in
 [`docs/public-submission.md`](docs/public-submission.md). The benchmark and a standalone evidence
 viewer are in [`evals/results/benchmark.md`](evals/results/benchmark.md) and
 [`evals/results/review.html`](evals/results/review.html) — one run per case, a behavioral comparison
-rather than a statistical claim. They currently describe version 1.0.0 and must be regenerated
-before the next submission. Support goes through [`SUPPORT.md`](SUPPORT.md) and GitHub Issues.
+rather than a statistical claim, produced from the exact commit they describe. Support goes through [`SUPPORT.md`](SUPPORT.md) and GitHub Issues.
 
 ## License
 

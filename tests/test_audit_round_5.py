@@ -548,12 +548,27 @@ class ReviewRoundEightTests(WorkflowFixture):
         act = close.index("perform exactly the actions the user authorized")
         self.assertLess(record, act, "approval must be recorded before the close actions run")
 
-    def test_release_gate_rejects_evidence_from_another_version(self) -> None:
+    def test_release_gate_compares_evidence_against_the_released_version(self) -> None:
+        # Assert the mechanism in both directions. Asserting today's staleness instead
+        # would bake a passing state into the test and stop catching the regression.
         validator = load_release_validator()
-        manifest = validator.validate()
+        benchmark = json.loads(
+            (ROOT / "evals" / "results" / "benchmark.json").read_text(encoding="utf-8")
+        )
+        recorded = benchmark["metadata"]["plugin_version"]
+
         with self.assertRaisesRegex(validator.ReleaseValidationError, "rerun the eval suite"):
-            validator.validate(require_current_evidence=True)
-        self.assertEqual(manifest["name"], "truedev-workflow")
+            validator.validate_evidence_is_current({"version": "0.0.0-not-this-release"})
+        validator.validate_evidence_is_current({"version": recorded})
+
+    def test_published_evidence_describes_the_current_release(self) -> None:
+        validator = load_release_validator()
+        manifest = validator.validate(require_current_evidence=True)
+        benchmark = json.loads(
+            (ROOT / "evals" / "results" / "benchmark.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(benchmark["metadata"]["plugin_version"], manifest["version"])
+        self.assertTrue(benchmark["metadata"].get("source_commit"))
 
     def test_eval_resume_rejects_a_run_whose_inputs_changed(self) -> None:
         runner = load_eval_runner()
@@ -571,3 +586,32 @@ class ReviewRoundEightTests(WorkflowFixture):
             self.assertTrue(runner.completed_run(workspace, "x", "with_skill", item))
             changed = dict(item, prompt="a different question")
             self.assertFalse(runner.completed_run(workspace, "x", "with_skill", changed))
+
+    def test_release_gate_rejects_evidence_from_a_modified_tree(self) -> None:
+        validator = load_release_validator()
+        benchmark = ROOT / "evals" / "results" / "benchmark.json"
+        original = benchmark.read_text(encoding="utf-8")
+        data = json.loads(original)
+        version = data["metadata"]["plugin_version"]
+        try:
+            for commit, expected in (
+                ("a" * 40 + "-dirty", "modified working tree"),
+                ("unknown", "must record the commit"),
+                (None, "must record the commit"),
+            ):
+                with self.subTest(commit=commit):
+                    tampered = json.loads(original)
+                    if commit is None:
+                        tampered["metadata"].pop("source_commit", None)
+                    else:
+                        tampered["metadata"]["source_commit"] = commit
+                    benchmark.write_text(
+                        json.dumps(tampered, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        validator.ReleaseValidationError, expected
+                    ):
+                        validator.validate_evidence_is_current({"version": version})
+        finally:
+            benchmark.write_text(original, encoding="utf-8")

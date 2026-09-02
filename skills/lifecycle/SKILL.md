@@ -37,9 +37,11 @@ the user's repository.
   run `lifecycle approve --step <STEP> --user-confirmed`.
 - **ambiguous response at a user gate:** do not transition. Name the gate and ask the user to approve
   it or reject/request revisions to the presented evidence.
-- **continue/resume:** validate state, read only the current section of
-  `<SKILL_DIR>/references/steps.md`, and
-  continue that step.
+- **continue/resume:** validate state, then recover the task itself from durable artifacts — the
+  slice file named by `status`, its acceptance criteria, and the repository documents it points to.
+  The restored summary carries enum values only, never task text, so it tells you where you are and
+  never what the work is. Then read only the current section of
+  `<SKILL_DIR>/references/steps.md` and continue that step.
 - **bug or failing check:** reproduce it, trace the root cause, add the smallest regression test that
   fails for that cause, then make the narrowest fix. Keep these actions inside the normal ordered steps.
 - **recover after a branch change:** stop mutation, show the recorded and active branches, and use

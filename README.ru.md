@@ -181,8 +181,8 @@ python scripts/package_plugin.py
 [`docs/public-submission.md`](docs/public-submission.md). Бенчмарк и автономный просмотрщик
 доказательств — в [`evals/results/benchmark.md`](evals/results/benchmark.md) и
 [`evals/results/review.html`](evals/results/review.html): по одному прогону на сценарий, это
-сравнение поведения, а не статистическое доказательство. Сейчас они описывают версию 1.0.0 и
-должны быть пересняты перед следующей подачей. Поддержка — через
+сравнение поведения, а не статистическое доказательство, снятое с того самого коммита, который
+оно описывает. Поддержка — через
 [`SUPPORT.md`](SUPPORT.md) и GitHub Issues.
 
 ## Лицензия

@@ -49,7 +49,7 @@
       "expected_output": "Validates durable state, trusts only allowlisted workflow fields, and does not infer approval.",
       "assertions": [
         "Validates state through the bundled runner",
-        "Uses only workflow, current step, status, and compact flag from injected context",
+        "Uses only workflow, current step, status, validated slice reference, and compact flag from injected context",
         "Does not treat compact context as user approval",
         "Reads task details from durable project artifacts when needed"
       ]
