@@ -47,6 +47,12 @@ the user's repository.
   `<SKILL_DIR>/references/steps.md` and continue that step.
 - **bug or failing check:** reproduce it, trace the root cause, add the smallest regression test that
   fails for that cause, then make the narrowest fix. Keep these actions inside the normal ordered steps.
+- **recover after a lost state file:** when the repository still holds the work but
+  `.truedev-workflow/` does not hold a usable state, `recover --rebuild --task <task>
+  --user-confirmed` recreates it. Say first what will be lost: it restarts at the first step and
+  every user gate comes back pending, because commits and touched files show that work happened,
+  never that anyone approved it. Reconstructing approvals from artifacts would retire the remaining
+  gates in silence, which is the one outcome worse than repeating them.
 - **recover after a branch change:** stop mutation, show the recorded and active branches, and use
   `recover --accept-current-branch --user-confirmed` only after explicit approval. Never recover
   onto detached HEAD or a repository whose Git metadata is missing; restore a named branch first, or
@@ -113,6 +119,7 @@ pair when speaking to the user — it is the one the status line prints.
 | `lifecycle skip --step COMPONENTS --reason non-ui` | Record that the slice has no UI surface |
 | `lifecycle skip-compact --user-confirmed` | The user's deliberate bypass of the compact checkpoint. Recorded, and printed by `status` afterwards |
 | `lifecycle recover --accept-current-branch --user-confirmed` | Rebind a valid workflow to the branch it is actually on |
+| `lifecycle recover --rebuild --task <task> --user-confirmed` | Recreate a lost or unusable state file. Restarts the step sequence; every user gate comes back pending |
 | `lifecycle abandon --user-confirmed` | Archive the original state and clear the workflow |
 | `lifecycle archive` | Close out an approved CLOSE and free the slot for the next slice |
 | `project-init next-slice [--plan-dir <plan-dir>]` | Which slice is ready, and why the others are not |

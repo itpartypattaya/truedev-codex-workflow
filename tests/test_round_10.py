@@ -418,5 +418,127 @@ class CommandDocumentationTests(unittest.TestCase):
                 self.assertNotIn("release-compact --user-confirmed`\n", body.split("`approve`")[0])
 
 
+class RebuildTests(WorkflowFixture):
+    """A repository can outlive its state file; the way back must not invent approvals."""
+
+    def start_lifecycle(self) -> None:
+        write(
+            self.root / "docs" / "plan" / "slice-001-base.md",
+            "# slice-001-base\n\nStatus: pending\nDepends on: none\n",
+        )
+        code, _, error = self.cli(
+            "lifecycle", "start", "--task", "original",
+            "--slice", "docs/plan/slice-001-base.md", "--base", "main",
+        )
+        self.assertEqual(code, 0, error)
+
+    def state(self) -> dict:
+        return json.loads(
+            (self.root / ".truedev-workflow" / "lifecycle.json").read_text(encoding="utf-8")
+        )
+
+    def test_rebuild_requires_confirmation_and_a_task(self) -> None:
+        code, _, error = self.cli("lifecycle", "recover", "--rebuild", "--task", "t")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--user-confirmed", error)
+
+        code, _, error = self.cli("lifecycle", "recover", "--rebuild", "--user-confirmed")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--task", error)
+
+    def test_rebuild_leaves_every_user_gate_pending(self) -> None:
+        self.start_lifecycle()
+        code, _, error = self.cli("lifecycle", "finish", "--step", "CONTEXT_CHECK")
+        self.assertEqual(code, 0, error)
+        code, _, error = self.cli("lifecycle", "gate", "--step", "SCOPE")
+        self.assertEqual(code, 0, error)
+        code, _, error = self.cli(
+            "lifecycle", "complete", "--step", "SCOPE", "--user-confirmed"
+        )
+        self.assertEqual(code, 0, error)
+
+        code, output, error = self.cli(
+            "lifecycle", "recover", "--rebuild", "--task", "rebuilt",
+            "--slice", "docs/plan/slice-001-base.md", "--base", "main", "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        self.assertIn("every user gate is pending", output)
+
+        state = self.state()
+        self.assertEqual(state["task"], "rebuilt")
+        self.assertEqual(state["current_step"], workflow.LIFECYCLE_STEPS[0])
+        for name in workflow.LIFECYCLE_USER_GATES:
+            with self.subTest(gate=name):
+                self.assertEqual(state["steps"][name]["status"], "pending")
+
+    def test_rebuild_records_its_own_receipt(self) -> None:
+        self.start_lifecycle()
+        code, _, error = self.cli(
+            "lifecycle", "recover", "--rebuild", "--task", "rebuilt",
+            "--base", "main", "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        receipts = [entry for entry in self.state()["history"] if entry["action"] == "rebuild"]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]["actor"], "user-explicit")
+
+    def test_rebuild_keeps_the_bytes_it_replaces(self) -> None:
+        self.start_lifecycle()
+        original = (self.root / ".truedev-workflow" / "lifecycle.json").read_bytes()
+        code, output, error = self.cli(
+            "lifecycle", "recover", "--rebuild", "--task", "rebuilt",
+            "--base", "main", "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        self.assertIn("previous state kept at", output)
+        archives = list(
+            (self.root / ".truedev-workflow" / "history").glob("*-lifecycle-before-rebuild.state")
+        )
+        self.assertEqual(len(archives), 1)
+        self.assertEqual(archives[0].read_bytes(), original)
+
+    def test_rebuild_works_when_the_state_file_is_gone(self) -> None:
+        self.start_lifecycle()
+        (self.root / ".truedev-workflow" / "lifecycle.json").unlink()
+        code, output, error = self.cli(
+            "lifecycle", "recover", "--rebuild", "--task", "rebuilt",
+            "--base", "main", "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        self.assertNotIn("previous state kept at", output)
+        self.assertEqual(self.state()["task"], "rebuilt")
+
+    def test_rebuild_is_not_allowed_while_a_gate_is_open(self) -> None:
+        def payload(command: str) -> dict:
+            return {
+                "cwd": str(self.root),
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+
+        # The branch-recovery mode reads and is allowed; the rebuild writes and is not.
+        self.assertTrue(
+            workflow._is_safe_gate_command(
+                payload(
+                    f'python "{RUNNER}" lifecycle recover '
+                    "--accept-current-branch --user-confirmed"
+                )
+            )
+        )
+        self.assertFalse(
+            workflow._is_safe_gate_command(
+                payload(f'python "{RUNNER}" lifecycle recover --rebuild --task t --user-confirmed')
+            )
+        )
+
+    def test_the_two_recover_modes_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(SystemExit) as raised:
+            self.cli(
+                "lifecycle", "recover", "--rebuild", "--accept-current-branch",
+                "--task", "t", "--user-confirmed",
+            )
+        self.assertEqual(raised.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
