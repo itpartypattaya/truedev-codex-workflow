@@ -4,6 +4,23 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.14] — 2026-09-02
+
+### Added
+- `second_opinion` in `truedev.project.json`: an object with exactly `scope` and `review`, each
+  naming one reviewer to consult before that gate opens — another installed skill, or a subagent
+  brief. `project-config init` takes `--second-opinion-scope` and `--second-opinion-review`.
+- SCOPE and REVIEW consult the named reviewer and present its findings as their own attributed
+  block, so the reader can tell an outside view from the author's own.
+
+### Changed
+- The reviewer runs **before** `gate`, never after. An open gate blocks subagent launches, so a
+  review deferred to that point cannot happen at all — the layer would look optional and be absent.
+- `null` is a reported fact, not a silent skip: the step writes `second opinion: not configured` in
+  its evidence. An unmentioned reviewer reads as one that was taken and agreed.
+- `project-init` asks once at `INPUT_VALIDATION` and keeps the answer in `docs/REQUIREMENTS.md`
+  instead of asking again at every phase.
+
 ## [1.1.13] — 2026-09-02
 
 ### Added
