@@ -540,5 +540,112 @@ class RebuildTests(WorkflowFixture):
         self.assertEqual(raised.exception.code, 2)
 
 
+class UpdateNoticeTests(WorkflowFixture):
+    """A stale install is invisible unless something says so — and saying so must be cheap."""
+
+    def install(self, version: str) -> Path:
+        install = self.base / "install"
+        manifest = install / ".codex-plugin" / "plugin.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"name": "truedev-workflow", "version": version}) + "\n",
+            encoding="utf-8",
+        )
+        return install
+
+    def marketplace(self, version: str) -> Path:
+        codex_home = self.base / "codex-home"
+        manifest = (
+            codex_home / "plugins" / "marketplaces" / "truedev" / ".codex-plugin" / "plugin.json"
+        )
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"name": "truedev-workflow", "version": version}) + "\n",
+            encoding="utf-8",
+        )
+        return codex_home
+
+    def environment(self, installed: str, published: str | None, **extra: str) -> dict:
+        env = {
+            "PLUGIN_ROOT": str(self.install(installed)),
+            "HOME": str(self.base / "home"),
+            "USERPROFILE": str(self.base / "home"),
+        }
+        if published is not None:
+            env["CODEX_HOME"] = str(self.marketplace(published))
+        env.update(extra)
+        (self.base / "home").mkdir(parents=True, exist_ok=True)
+        return env
+
+    def available(self, env: dict) -> tuple[str, str] | None:
+        import os
+
+        saved = dict(os.environ)
+        try:
+            os.environ.clear()
+            os.environ.update(env)
+            return workflow.available_update()
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def test_a_newer_marketplace_version_is_reported(self) -> None:
+        found = self.available(self.environment("1.1.13", "1.1.16"))
+        self.assertEqual(found, ("1.1.13", "1.1.16"))
+
+    def test_an_equal_or_older_version_is_not_an_update(self) -> None:
+        self.assertIsNone(self.available(self.environment("1.1.16", "1.1.16")))
+        self.assertIsNone(self.available(self.environment("1.1.16", "1.1.13")))
+
+    def test_a_version_that_cannot_be_parsed_is_never_newer(self) -> None:
+        self.assertIsNone(self.available(self.environment("1.1.13", "2.0.0-rc1")))
+        self.assertIsNone(self.available(self.environment("not-a-version", "1.1.16")))
+
+    def test_the_check_can_be_turned_off_entirely(self) -> None:
+        env = self.environment("1.1.13", "1.1.16", TRUEDEV_UPDATE_CHECK="off")
+        self.assertIsNone(self.available(env))
+
+    def test_the_check_is_throttled_to_once_a_day(self) -> None:
+        env = self.environment("1.1.13", "1.1.16")
+        self.assertIsNotNone(self.available(env))
+        # The stamp written by the first call must suppress the second.
+        self.assertIsNone(self.available(env))
+
+    def test_the_network_half_is_opt_in(self) -> None:
+        import os
+
+        saved = dict(os.environ)
+        try:
+            os.environ.clear()
+            os.environ.update(self.environment("1.1.13", None))
+            self.assertIsNone(workflow._published_manifest_version())
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def test_the_notice_never_raises(self) -> None:
+        import os
+
+        saved = dict(os.environ)
+        try:
+            os.environ.clear()
+            os.environ.update({"PLUGIN_ROOT": "not-absolute"})
+            self.assertEqual(workflow.hook_session_update_notice(), 0)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def test_startup_and_resume_are_wired_and_anchored(self) -> None:
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        matchers = [group.get("matcher") for group in hooks["hooks"]["SessionStart"]]
+        self.assertEqual(matchers, ["^compact$", "^(startup|resume)$"])
+
+    def test_the_privacy_policy_describes_the_request(self) -> None:
+        privacy = (ROOT / "PRIVACY.md").read_text(encoding="utf-8")
+        self.assertIn("TRUEDEV_UPDATE_CHECK=network", privacy)
+        self.assertIn("no network request unless you ask", privacy)
+        self.assertNotIn("bundled network client", privacy)
+
+
 if __name__ == "__main__":
     unittest.main()

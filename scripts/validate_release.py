@@ -134,6 +134,12 @@ def validate_hooks() -> None:
                         f"{label} hook must not guess the command shell",
                     )
                 require("py -3" not in windows, "Windows hook must not assume a registered py launcher")
+    # An unanchored matcher is how "compact" starts matching "precompact-something".
+    session_matchers = [group.get("matcher") for group in hooks["SessionStart"]]
+    require(
+        session_matchers == ["^compact$", "^(startup|resume)$"],
+        "SessionStart must anchor exactly the compact and startup/resume matchers",
+    )
 
 
 def validate_codex_gating() -> None:
