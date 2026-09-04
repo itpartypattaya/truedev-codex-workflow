@@ -4,6 +4,23 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.17] — 2026-09-02
+
+### Added
+- Both READMEs now say plainly what the four hook wirings do, what they do not enforce, and what
+  the plugin costs in context: about 1,000 characters of skill descriptions, roughly 255 tokens,
+  measured rather than estimated. The hooks themselves cost nothing in context — they run in the
+  harness, not in the model.
+
+### Changed
+- The limits are stated rather than implied. The runner writes the state, not the model, so a step
+  cannot quietly demote its own gate — but a model can still claim in prose that it ran a check it
+  did not run, the pre-tool hook sees only what the host reports, and everything below the hook
+  layer is instructions to a model. Anything with write access can end enforcement by deleting
+  `.truedev-workflow/`, which is the intended way out rather than a hole to plug.
+- Tests keep the narrative honest: the hook table has to list exactly as many rows as `hooks.json`
+  has wirings, and the character count has to stay near the number the text quotes.
+
 ## [1.1.16] — 2026-09-02
 
 ### Added

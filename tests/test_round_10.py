@@ -647,5 +647,42 @@ class UpdateNoticeTests(WorkflowFixture):
         self.assertNotIn("bundled network client", privacy)
 
 
+class HookNarrativeTests(unittest.TestCase):
+    """The README claims things about the hooks; the hooks have to still be doing them."""
+
+    def test_the_table_lists_every_wiring_that_actually_exists(self) -> None:
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        wirings = sum(len(groups) for groups in hooks.values())
+        for name in ("README.md", "README.ru.md"):
+            with self.subTest(name=name):
+                text = (ROOT / name).read_text(encoding="utf-8")
+                rows = [
+                    line
+                    for line in text.splitlines()
+                    if line.startswith("| `SessionStart") or line.startswith("| `PreToolUse")
+                    or line.startswith("| `Stop`")
+                ]
+                self.assertEqual(len(rows), wirings)
+
+    def test_the_context_cost_is_the_measured_one(self) -> None:
+        total = 0
+        for name in ("lifecycle", "project-init"):
+            text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            front = text.split("---")[1]
+            for line in front.splitlines():
+                if line.startswith("description:"):
+                    total += len(line.split(":", 1)[1].strip())
+        # The README says "about 1,000 characters, roughly 255 tokens". Keep it honest.
+        self.assertLess(abs(total - 1000), 120, f"skill descriptions now total {total} characters")
+
+    def test_the_limits_are_stated_not_implied(self) -> None:
+        for name, marker in (
+            ("README.md", "The runner writes the state, not the model."),
+            ("README.ru.md", "Состояние пишет раннер, а не модель."),
+        ):
+            with self.subTest(name=name):
+                self.assertIn(marker, (ROOT / name).read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
