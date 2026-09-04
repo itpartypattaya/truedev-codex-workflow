@@ -1,6 +1,6 @@
 {
   "name": "truedev-workflow",
-  "version": "1.1.12",
+  "version": "1.1.13",
   "description": "A gated, file-backed product and engineering workflow for long-running Codex tasks.",
   "author": {
     "name": "IT Party Pattaya",

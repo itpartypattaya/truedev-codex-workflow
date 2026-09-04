@@ -207,6 +207,97 @@ class NextActionTests(WorkflowFixture):
         self.assertIn("gate INPUT_VALIDATION", fields["next_action"])
 
 
+class AdoptionDialogueTests(WorkflowFixture):
+    def test_each_layer_is_its_own_recorded_answer(self) -> None:
+        code, _, error = self.cli(
+            "project-config", "init",
+            "--test-setup", "accepted:vitest",
+            "--e2e-setup", "declined:once",
+            "--integration-test", "accepted:telethon",
+            "--user-confirmed",
+        )
+        self.assertEqual(code, 0, error)
+        value = workflow.load_project_config(self.root)
+        self.assertEqual(value["test_setup"], "accepted:vitest")
+        self.assertEqual(value["e2e_setup"], "declined:once")
+        self.assertEqual(value["integration_test"], "accepted:telethon")
+
+    def test_silence_records_nothing(self) -> None:
+        code, _, error = self.cli("project-config", "init", "--user-confirmed")
+        self.assertEqual(code, 0, error)
+        value = workflow.load_project_config(self.root)
+        for field in workflow.SETUP_FIELDS:
+            with self.subTest(field=field):
+                self.assertIsNone(value[field], "absent is not declined")
+
+    def test_every_layer_shares_one_grammar(self) -> None:
+        for flag in ("--test-setup", "--e2e-setup", "--integration-test"):
+            for bad in ("maybe", "accepted:", "accepted:   "):
+                with self.subTest(flag=flag, value=bad):
+                    code, _, error = self.cli(
+                        "project-config", "init", flag, bad, "--user-confirmed"
+                    )
+                    self.assertEqual(code, 2)
+                    self.assertIn("must be", error)
+
+    def test_adopted_from_only_accepts_the_documented_marker(self) -> None:
+        code, _, error = self.cli(
+            "project-config", "init", "--adopted-from", "empty", "--user-confirmed"
+        )
+        self.assertEqual(code, 0, error)
+        self.assertEqual(workflow.load_project_config(self.root)["adopted_from"], "empty")
+
+        write(
+            self.root / workflow.PROJECT_CONFIG_FILE,
+            '{"commands": {"build": null, "lint": null, "test": null, "e2e": null},'
+            ' "adopted_from": "somewhere"}\n',
+        )
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.load_project_config(self.root)
+
+    def test_an_empty_repository_is_marked_for_a_second_pass(self) -> None:
+        self.assertEqual(workflow.detect_project(self.root)["adopted_from_hint"], "empty")
+
+        write(self.root / "go.mod", "module example.invalid/x\n\ngo 1.22\n")
+        result = workflow.detect_project(self.root)
+        self.assertIsNone(result["adopted_from_hint"], "a manifest ends the empty case")
+        self.assertEqual(result["stack"], "go")
+
+    def test_a_config_written_before_this_release_still_loads(self) -> None:
+        write(
+            self.root / workflow.PROJECT_CONFIG_FILE,
+            '{"commands": {"build": null, "lint": null, "test": "pytest", "e2e": null},'
+            ' "test_setup": "declined:always"}\n',
+        )
+        value = workflow.load_project_config(self.root)
+        self.assertEqual(value["test_setup"], "declined:always")
+        self.assertIsNone(value.get("e2e_setup"))
+
+
+class AdoptionDocumentationTests(unittest.TestCase):
+    def test_the_dialogue_names_every_field_it_records(self) -> None:
+        text = (
+            ROOT / "skills" / "lifecycle" / "references" / "project-config.md"
+        ).read_text(encoding="utf-8")
+        dialogue = text.split("## The adoption dialogue", 1)
+        self.assertEqual(len(dialogue), 2, "the dialogue section must exist")
+        for needle in ("accepted:", "declined:once", "declined:always", "adopted_from_hint"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, dialogue[1])
+        self.assertIn("Silence is not a decline", dialogue[1])
+        self.assertIn("Never install anything during adoption", dialogue[1])
+
+    def test_the_test_step_installs_an_accepted_layer(self) -> None:
+        text = (ROOT / "skills" / "lifecycle" / "references" / "steps.md").read_text(
+            encoding="utf-8"
+        )
+        test_section = text.split("## TEST", 1)[1].split("## VERIFY", 1)[0]
+        for field in ("test_setup", "e2e_setup", "integration_test"):
+            with self.subTest(field=field):
+                self.assertIn(field, test_section)
+        self.assertIn("credentials in the environment", test_section)
+
+
 class CommandDocumentationTests(unittest.TestCase):
     def test_every_documented_command_exists_in_the_runner(self) -> None:
         text = (ROOT / "skills" / "lifecycle" / "SKILL.md").read_text(encoding="utf-8")

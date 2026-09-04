@@ -25,6 +25,27 @@ def _manifest_version() -> str:
     return str(manifest.get("version", "unknown"))
 
 
+def _executor_identity() -> str:
+    """Report the executor the runs actually used, not the one this file was written against.
+
+    It was a hardcoded string, so a CLI upgrade left the evidence naming a version that had
+    not produced it.
+    """
+    identities = set()
+    for item in load_evals():
+        for configuration in ("with_skill", "without_skill"):
+            timing = DEFAULT_WORKSPACE / item["id"] / configuration / "timing.json"
+            try:
+                recorded = json.loads(timing.read_text(encoding="utf-8")).get("executor")
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if isinstance(recorded, str) and recorded:
+                identities.add(recorded)
+    if not identities:
+        return "unrecorded executor"
+    return "; ".join(sorted(identities))
+
+
 def _source_commit() -> str:
     """Record which tree produced this evidence, so staleness is detectable later.
 
@@ -260,7 +281,7 @@ def aggregate(runs: list[dict[str, Any]], judged: dict[str, Any], grader_timing:
             "skill_path": "skills/",
             "plugin_version": _manifest_version(),
             "source_commit": _source_commit(),
-            "executor_model": "Codex CLI default (recorded with CLI 0.146.1)",
+            "executor_model": _executor_identity(),
             "analyzer_model": "Codex CLI default (independent judge)",
             "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
             "evals_run": [item["id"] for item in load_evals()],

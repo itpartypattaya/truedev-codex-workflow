@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import hashlib
 import json
 import os
@@ -34,6 +35,51 @@ def codex_command() -> list[str]:
     if not executable:
         raise RuntimeError("codex CLI was not found; set CODEX_EVAL_COMMAND")
     return [executable]
+
+
+# The CLI default for reasoning effort is not ours to rely on: it changed under us between
+# 0.146.1 and 0.152.1 and halved the executor's output, which reads as a skill regression.
+REASONING_EFFORT = "medium"
+
+# 0.152.1 stopped treating an arbitrary `pwsh -Command` as self-evidently safe. `exec` runs with
+# nobody to ask, so every such command was auto-denied: the executor could not read one skill file,
+# and the benchmark measured a blind run instead of the skill. `--approve-for-me` routes that
+# decision to an automatic reviewer. The sandbox stays read-only, and both are named here rather
+# than left to a CLI default, because a default is what changed under us last time.
+SANDBOX_MODE = "read-only"
+APPROVAL_ROUTING = "--approve-for-me"
+
+
+@functools.lru_cache(maxsize=1)
+def executor_identity() -> str:
+    """Name the executor precisely, because a benchmark compares runs, not intentions.
+
+    A CLI upgrade changes the thing being measured. Recording it makes a cross-version
+    comparison visible instead of silent, and putting it in the fingerprint stops one
+    configuration being reused from an older CLI while the other is re-executed on a
+    newer one — which compares the two CLIs and calls the difference a skill effect.
+    """
+    try:
+        result = subprocess.run(
+            [*codex_command(), "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, RuntimeError):
+        return (
+            f"unknown CLI, reasoning effort {REASONING_EFFORT}, "
+            f"sandbox {SANDBOX_MODE} with {APPROVAL_ROUTING}"
+        )
+    version = result.stdout.strip() or result.stderr.strip()
+    version = " ".join(version.split())[:120] or "unknown CLI"
+    return (
+        f"{version}, reasoning effort {REASONING_EFFORT}, "
+        f"sandbox {SANDBOX_MODE} with {APPROVAL_ROUTING}"
+    )
 
 
 def load_evals() -> list[dict[str, Any]]:
@@ -134,6 +180,7 @@ def input_fingerprint(item: dict[str, Any], configuration: str) -> str:
     digest.update(json.dumps(item, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     digest.update(configuration.encode("utf-8"))
     digest.update(make_prompt(item, configuration).encode("utf-8"))
+    digest.update(executor_identity().encode("utf-8"))
     if configuration != "with_skill":
         return digest.hexdigest()
     sources = [ROOT / "scripts" / "truedev_workflow.py"]
@@ -154,6 +201,7 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
     run_dir = eval_dir / configuration
     outputs = run_dir / "outputs"
     outputs.mkdir(parents=True, exist_ok=True)
+    executor = executor_identity()
     metadata = {
         "eval_id": item["id"],
         "eval_name": item["id"].replace("-", " ").title(),
@@ -170,8 +218,11 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
         "exec",
         "--ephemeral",
         "--ignore-user-config",
-        "--sandbox",
-        "read-only",
+        "-c",
+        f'model_reasoning_effort="{REASONING_EFFORT}"',
+        "-c",
+        f'sandbox_mode="{SANDBOX_MODE}"',
+        APPROVAL_ROUTING,
         "--skip-git-repo-check",
         "--json",
         "-C",
@@ -210,6 +261,7 @@ def run_one(item: dict[str, Any], configuration: str, fixture: Path, workspace: 
         "output_valid": output_valid,
         "completed": completed,
         "input_fingerprint": input_fingerprint(item, configuration),
+        "executor": executor,
     }
     (run_dir / "timing.json").write_text(
         json.dumps(timing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
