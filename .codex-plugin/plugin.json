@@ -22,7 +22,7 @@
     "shortDescription": "Gated delivery for Codex",
     "longDescription": "TrueDev Workflow keeps long Codex coding tasks on rails. Project Init turns a product or engineering specification into durable requirements, a PRD, architecture decisions, and dependency-ordered vertical slices. Lifecycle then delivers one slice at a time through context check, scope, plan, components, implementation, tests, verification, review, documentation, and closeout, stopping at five explicit approval gates.\n\nEvery transition goes through a bundled Python runner that validates local state, records who approved what and when, and refuses to approve a gate if the repository changed while it was open. A vague \"continue\" is never treated as approval.\n\nBuilt for developers and teams who use Codex on real repositories and want reviewable checkpoints instead of one long autonomous run.\n\nLimitations: works in Codex only and needs Git and Python 3.9 or newer. Workflow state stays in .truedev-workflow/ inside your repository; the plugin sends it nowhere. The checks are workflow guardrails, not a security boundary: anything with write access can delete the state, and Git-ignored files are not fingerprinted. Based on the MIT-licensed workflow by Igor Druzhinin (UnBergant).",
     "developerName": "Anton Vaskov",
-    "category": "Productivity",
+    "category": "Developer Tools",
     "capabilities": [
       "Interactive",
       "Write"
