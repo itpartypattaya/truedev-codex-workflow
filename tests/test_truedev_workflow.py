@@ -320,6 +320,16 @@ class WorkflowTests(unittest.TestCase):
             0,
         )
         self.assertEqual(self.cli("lifecycle", "finish", "--step", "PLAN")[0], 0)
+        # The compact checkpoint holds every transition, skip included, until it closes.
+        code, _, error = self.cli(
+            "lifecycle", "skip", "--step", "COMPONENTS", "--reason", "non-ui"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("compact checkpoint", error)
+        self.hook(
+            "session-start",
+            {"cwd": str(self.root), "hook_event_name": "SessionStart", "source": "compact"},
+        )
         code, _, error = self.cli(
             "lifecycle", "skip", "--step", "COMPONENTS", "--reason", "non-ui"
         )

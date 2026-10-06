@@ -1,9 +1,9 @@
 {
   "name": "truedev-workflow",
-  "version": "1.1.17",
+  "version": "1.2.0",
   "description": "A gated, file-backed product and engineering workflow for long-running Codex tasks.",
   "author": {
-    "name": "IT Party Pattaya",
+    "name": "Anton Vaskov",
     "url": "https://github.com/itpartypattaya"
   },
   "homepage": "https://github.com/itpartypattaya/truedev-codex-workflow",
@@ -20,14 +20,15 @@
   "interface": {
     "displayName": "TrueDev Workflow",
     "shortDescription": "Gated delivery for Codex",
-    "longDescription": "Turn a specification into durable project artifacts, then deliver each vertical slice through scoped planning, implementation, verification, review, and explicit approval gates.",
-    "developerName": "IT Party Pattaya",
+    "longDescription": "TrueDev Workflow keeps long Codex coding tasks on rails. Project Init turns a product or engineering specification into durable requirements, a PRD, architecture decisions, and dependency-ordered vertical slices. Lifecycle then delivers one slice at a time through context check, scope, plan, components, implementation, tests, verification, review, documentation, and closeout, stopping at five explicit approval gates.\n\nEvery transition goes through a bundled Python runner that validates local state, records who approved what and when, and refuses to approve a gate if the repository changed while it was open. A vague \"continue\" is never treated as approval.\n\nBuilt for developers and teams who use Codex on real repositories and want reviewable checkpoints instead of one long autonomous run.\n\nLimitations: works in Codex only and needs Git and Python 3.9 or newer. Workflow state stays in .truedev-workflow/ inside your repository; the plugin sends it nowhere. The checks are workflow guardrails, not a security boundary: anything with write access can delete the state, and Git-ignored files are not fingerprinted. Based on the MIT-licensed workflow by Igor Druzhinin (UnBergant).",
+    "developerName": "Anton Vaskov",
     "category": "Productivity",
     "capabilities": [
       "Interactive",
       "Write"
     ],
     "websiteURL": "https://github.com/itpartypattaya/truedev-codex-workflow",
+    "supportURL": "https://github.com/itpartypattaya/truedev-codex-workflow/issues",
     "privacyPolicyURL": "https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/TERMS.md",
     "brandColor": "#5B21B6",
@@ -39,5 +40,12 @@
       "Start the next ready slice with $lifecycle, and stop at every gate.",
       "Show me $lifecycle status: the open gate and the next action."
     ]
+  },
+  "extensions": {
+    "com.openai": {
+      "publication": {
+        "release_notes": "Directory edition: a skills-only package without lifecycle hooks, where every approval gate is held by the runner's working-tree integrity check. Both editions now refuse to approve a gate whose evidence changed after it opened, hold every transition while the compact checkpoint is open, and are gated to Codex."
+      }
+    }
   }
 }

@@ -16,10 +16,11 @@ requirement rather than an optional convenience.
 
 ## Locate the bundled runner
 
-Let `<SKILL_DIR>` be the directory containing this `SKILL.md`. Its grandparent is `<PLUGIN_ROOT>`,
-then use:
+Let `<SKILL_DIR>` be the directory containing this `SKILL.md`; its grandparent is `<PLUGIN_ROOT>`.
+`<RUNNER>` is the first of these that exists:
 
 ```text
+<SKILL_DIR>/scripts/truedev_workflow.py
 <PLUGIN_ROOT>/scripts/truedev_workflow.py
 ```
 
@@ -100,7 +101,10 @@ python3 <RUNNER> project-init archive
 ```
 
 Before opening a gate, ensure the durable artifact contains the decisions and evidence the user is
-approving. Once a gate is open, mutating repository tools are blocked by the optional hooks.
+approving. Once a gate is open, do not change the repository: the runner fingerprints the working
+tree when the gate opens and refuses approval if it moved, and the optional hooks, when installed,
+also block mutating tools. If approval is refused for that reason, show the user the listed paths
+and add `--accept-changes` only after they accept those changes as part of what they approve.
 Use only the bundled `inspect git-status`, `inspect git-diff`, `inspect file --path <path>`,
 `detect`, and `project-config show` commands for additional evidence while a gate is open; raw
 shell and Git reads are intentionally blocked.

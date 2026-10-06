@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_script(name: str):
     path = ROOT / "scripts" / f"{name}.py"
+    # package_plugin imports validate_release by name; do not rely on another test module.
+    if str(path.parent) not in sys.path:
+        sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
@@ -40,7 +44,7 @@ class ReleaseTests(unittest.TestCase):
     def test_release_contract(self) -> None:
         validator = load_script("validate_release")
         manifest = validator.validate()
-        self.assertEqual(manifest["version"], "1.1.17")
+        self.assertEqual(manifest["version"], "1.2.0")
 
     def test_package_is_deterministic_and_minimal(self) -> None:
         package_module = load_script("package_plugin")
@@ -63,6 +67,68 @@ class ReleaseTests(unittest.TestCase):
     def test_default_package_name_tracks_manifest_version(self) -> None:
         package_module = load_script("package_plugin")
         self.assertEqual(package_module.default_output("9.8.7").name, "truedev-workflow-9.8.7.zip")
+        self.assertEqual(
+            package_module.default_output("9.8.7", "directory").name,
+            "truedev-workflow-9.8.7-directory.zip",
+        )
+
+    def test_directory_edition_is_skills_only_and_self_contained(self) -> None:
+        package_module = load_script("package_plugin")
+        validator = load_script("validate_release")
+        with tempfile.TemporaryDirectory() as temp:
+            first = Path(temp) / "first.zip"
+            second = Path(temp) / "second.zip"
+            package_module.build(first, "directory")
+            package_module.build(second, "directory")
+            self.assertEqual(hashlib.sha256(first.read_bytes()).digest(), hashlib.sha256(second.read_bytes()).digest())
+            with zipfile.ZipFile(first) as archive:
+                entries = {name: archive.read(name) for name in archive.namelist()}
+        validator.validate_directory_entries(entries)
+        names = set(entries)
+        self.assertNotIn("hooks/hooks.json", names)
+        self.assertNotIn("scripts/truedev_workflow.py", names)
+        runner = (ROOT / "scripts" / "truedev_workflow.py").read_bytes()
+        for skill in ("lifecycle", "project-init"):
+            self.assertEqual(entries[f"skills/{skill}/scripts/truedev_workflow.py"], runner)
+            policy = entries[f"skills/{skill}/agents/openai.yaml"].decode("utf-8")
+            self.assertTrue(policy.rstrip().endswith('products:\n    - "CODEX"'))
+        # The source skills stay ungated so a local Codex install reads them unchanged.
+        self.assertNotIn("products:", (ROOT / "skills" / "lifecycle" / "agents" / "openai.yaml").read_text(encoding="utf-8"))
+
+    def test_directory_validator_rejects_hooks_and_ungated_skills(self) -> None:
+        package_module = load_script("package_plugin")
+        validator = load_script("validate_release")
+        entries = dict(package_module.archive_entries("directory"))
+        with_hooks = dict(entries, **{"hooks/hooks.json": b"{}"})
+        with self.assertRaises(validator.ReleaseValidationError):
+            validator.validate_directory_entries(with_hooks)
+        ungated = dict(entries)
+        ungated["skills/lifecycle/agents/openai.yaml"] = (
+            ROOT / "skills" / "lifecycle" / "agents" / "openai.yaml"
+        ).read_bytes()
+        with self.assertRaises(validator.ReleaseValidationError):
+            validator.validate_directory_entries(ungated)
+
+    def test_full_edition_runner_sees_its_hooks_and_directory_copy_does_not(self) -> None:
+        package_module = load_script("package_plugin")
+        with tempfile.TemporaryDirectory() as temp:
+            for edition in ("full", "directory"):
+                target = Path(temp) / edition
+                for name, data in package_module.archive_entries(edition):
+                    path = target / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+            runners = {
+                "full": Path(temp) / "full" / "scripts" / "truedev_workflow.py",
+                "directory": Path(temp) / "directory" / "skills" / "lifecycle" / "scripts" / "truedev_workflow.py",
+            }
+            for edition, runner in runners.items():
+                result = subprocess.run(
+                    [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); "
+                     "import truedev_workflow as w; print(w.hooks_bundled())", str(runner.parent)],
+                    check=True, capture_output=True, text=True,
+                )
+                self.assertEqual(result.stdout.strip(), "True" if edition == "full" else "False", edition)
 
     def test_eval_selection_filters_before_limit(self) -> None:
         runner = load_eval_script("run_release_evals")

@@ -3,7 +3,11 @@
 
 The script intentionally uses only the Python standard library. It is called both
 by Codex hooks and by the bundled skills. Hooks are guardrails, not a security
-boundary: Codex hosts may have tool paths that do not emit hook events.
+boundary: Codex hosts may have tool paths that do not emit hook events. The runner
+therefore also checks every gate at the one door no path can skip, its own
+transitions: a gate records the working tree it was opened on, and approval refuses
+evidence that has moved since. The directory edition ships without hooks and relies
+on that check alone.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,6 +36,7 @@ MAX_INSPECT_FILE_BYTES = 1024 * 1024
 # interpreter, the runner path, and the diff flags.
 MAX_PATHSPEC_BYTES = 8000
 LOCK_TIMEOUT_SECONDS = 5.0
+INTEGRITY_PATH_LIMIT = 20
 DETACHED_HEAD = "(detached)"
 GIT_UNAVAILABLE = "(git-unavailable)"
 BRANCH_SENTINELS = frozenset({DETACHED_HEAD, GIT_UNAVAILABLE})
@@ -112,7 +118,8 @@ SAFE_RUNNER_COMMAND = re.compile(
     r"(?:lifecycle|project-init)\s+abandon\s+--user-confirmed|"
     r"lifecycle\s+recover\s+--accept-current-branch\s+--user-confirmed|"
     r"lifecycle\s+(?:release-compact|skip-compact)\s+--user-confirmed|"
-    r"(?:lifecycle|project-init)\s+(?:approve|complete)\s+(?:--(?:step|phase)\s+)?[A-Z_]+\s+--user-confirmed)\s*$"
+    r"(?:lifecycle|project-init)\s+(?:approve|complete)\s+(?:--(?:step|phase)\s+)?[A-Z_]+"
+    r"(?:\s+--accept-changes)?\s+--user-confirmed(?:\s+--accept-changes)?)\s*$"
 )
 class WorkflowError(RuntimeError):
     """A user-actionable workflow validation error."""
@@ -168,8 +175,12 @@ def iter_tracked_paths(root: Path) -> Iterator[str]:
         raise WorkflowError(stderr.decode("utf-8", "replace").strip() or "git ls-files failed")
 
 
-def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run_git(
+    root: Path, *args: str, extra_env: Mapping[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     env = _git_env()
+    if extra_env:
+        env.update(extra_env)
     command = ["git", "-C", str(root), "-c", "core.fsmonitor=false", *args]
     try:
         return subprocess.run(
@@ -584,6 +595,7 @@ def validate_state(state: Mapping[str, Any], workflow: str) -> None:
         _validate_timestamp(state.get("finished_at"), "finished_at")
     elif "finished_at" in state:
         raise WorkflowError("finished_at is only valid after the final step is completed")
+    _validate_integrity(state, order, current_key)
 
     history = state.get("history", [])
     if not isinstance(history, list) or len(history) > 1000:
@@ -752,6 +764,127 @@ def require_lifecycle_branch(root: Path, state: Mapping[str, Any]) -> None:
             f"lifecycle started on branch {recorded!r}, but the active branch is {active!r}; "
             "switch back or recover the workflow before mutating"
         )
+
+
+def hooks_bundled() -> bool:
+    """Whether this copy of the runner ships beside the plugin's lifecycle hooks.
+
+    The directory edition copies the runner into each skill and bundles no hooks, so
+    the answer comes from what was actually installed, not from a flag that could lie.
+    """
+    try:
+        return (Path(__file__).resolve().parents[1] / "hooks" / "hooks.json").is_file()
+    except (OSError, IndexError):
+        return False
+
+
+def _enforcement_label() -> str:
+    if hooks_bundled():
+        return "hooks + integrity check"
+    return "integrity check (this edition bundles no hooks)"
+
+
+def working_tree_fingerprint(root: Path) -> dict[str, Any]:
+    """Hash HEAD and every non-ignored file without touching the user's index.
+
+    A copy of the index keeps Git's stat cache, so only changed files are rehashed.
+    `git add` into that copy writes unreferenced objects that `git gc` later prunes;
+    nothing is staged, committed, or referenced. A failure is reported, never raised:
+    a repository this cannot hash must still be workable, and "unchecked" is recorded
+    as such rather than read as "clean".
+    """
+    result: dict[str, Any] = {"head": head_sha(root), "tree": None}
+    located = _run_git(root, "rev-parse", "--git-path", "index")
+    if located.returncode != 0:
+        result["error"] = _one_line(located.stderr.strip() or "cannot locate the Git index")[:500]
+        return result
+    index_path = Path(located.stdout.strip())
+    if not index_path.is_absolute():
+        index_path = root / index_path
+    with tempfile.TemporaryDirectory(prefix="truedev-integrity-") as temp:
+        temp_index = Path(temp) / "index"
+        try:
+            if index_path.is_file():
+                shutil.copyfile(index_path, temp_index)
+        except OSError as exc:
+            result["error"] = _one_line(f"cannot copy the Git index: {exc}")[:500]
+            return result
+        env = {"GIT_INDEX_FILE": str(temp_index)}
+        added = _run_git(root, "-c", "advice.addIgnoredFile=false", "add", "-A", extra_env=env)
+        if added.returncode != 0:
+            result["error"] = _one_line(added.stderr.strip() or "git add failed")[:500]
+            return result
+        written = _run_git(root, "write-tree", extra_env=env)
+    tree = written.stdout.strip()
+    if written.returncode != 0 or HEX_SHA.fullmatch(tree) is None:
+        result["error"] = _one_line(written.stderr.strip() or "git write-tree failed")[:500]
+        return result
+    result["tree"] = tree
+    return result
+
+
+def _validate_integrity(state: Mapping[str, Any], order: Sequence[str], current_key: str) -> None:
+    record = state.get("integrity")
+    if record is None:
+        return
+    if not isinstance(record, dict):
+        raise WorkflowError("integrity must be an object")
+    if record.get("step") != state.get(current_key):
+        raise WorkflowError("integrity must belong to the current step")
+    if state["steps"][record["step"]]["status"] != "awaiting_approval":
+        raise WorkflowError("integrity is only valid while the current gate awaits approval")
+    for field in ("head", "tree"):
+        value = record.get(field)
+        if value is not None and (not isinstance(value, str) or HEX_SHA.fullmatch(value) is None):
+            raise WorkflowError(f"integrity.{field} must be a hexadecimal object id")
+    _validate_timestamp(record.get("taken_at"), "integrity.taken_at")
+    if record.get("tree") is None:
+        _validate_text(record.get("error"), "integrity.error", maximum=500)
+    elif "error" in record:
+        raise WorkflowError("integrity.error is only valid without a tree")
+    if set(record) - {"step", "head", "tree", "taken_at", "error"}:
+        raise WorkflowError("integrity has unsupported fields")
+
+
+def _integrity_snapshot(root: Path, step: str) -> dict[str, Any]:
+    snapshot = working_tree_fingerprint(root)
+    snapshot["step"] = step
+    snapshot["taken_at"] = utc_now()
+    return snapshot
+
+
+def compare_integrity(root: Path, record: Mapping[str, Any] | None) -> tuple[str, list[str], str]:
+    """Return (verdict, changed paths, detail) for an open gate's snapshot.
+
+    The verdict is "intact", "changed", "unavailable", or "not-recorded" (a gate opened
+    by a version that took no snapshot).
+    """
+    if record is None:
+        return "not-recorded", [], "this gate was opened without a snapshot"
+    if record.get("tree") is None:
+        return "unavailable", [], str(record.get("error") or "no snapshot was taken")
+    now = working_tree_fingerprint(root)
+    if now.get("tree") is None:
+        return "unavailable", [], str(now.get("error") or "the working tree could not be hashed")
+    changed: list[str] = []
+    if now.get("head") != record.get("head"):
+        changed.append(f"HEAD moved {record.get('head') or '(none)'} -> {now.get('head') or '(none)'}")
+    if now["tree"] != record["tree"]:
+        diff = _run_git(root, "diff", "--name-only", "-z", "--no-renames", record["tree"], now["tree"])
+        names = [name for name in diff.stdout.split("\0") if name] if diff.returncode == 0 else []
+        changed.extend(_one_line(name) for name in names)
+        if not names:
+            changed.append("working tree differs (paths unavailable)")
+    if not changed:
+        return "intact", [], ""
+    return "changed", changed, ""
+
+
+def _describe_changes(changed: Sequence[str]) -> str:
+    shown = list(changed[:INTEGRITY_PATH_LIMIT])
+    if len(changed) > INTEGRITY_PATH_LIMIT:
+        shown.append(f"... and {len(changed) - INTEGRITY_PATH_LIMIT} more")
+    return ", ".join(shown)
 
 
 def _repo_root_or_error(cwd: str | Path | None = None) -> Path:
@@ -967,29 +1100,69 @@ def project_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def _require_compact_checkpoint_closed(state: Mapping[str, Any]) -> None:
+    """No step may move while the compact checkpoint is open.
+
+    The pre-tool hook used to be the only thing holding this line. Checking it in the
+    runner keeps the checkpoint real in the edition that bundles no hooks, and closes
+    the gap where runner commands were allowed through while it was open.
+    """
+    if not state.get("awaiting_compact"):
+        return
+    current = state["current_step"]
+    if hooks_bundled():
+        how = (
+            "compact the Codex task first; if this build emits no compact event, the user can "
+            "release it deliberately with skip-compact --user-confirmed"
+        )
+    else:
+        how = (
+            "ask the user to compact the Codex task, then run skip-compact --user-confirmed once "
+            "they confirm it is done"
+        )
+    raise WorkflowError(f"the compact checkpoint before {current} is still open; {how}")
+
+
 @_lock_named_workflow
-def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool = False) -> int:
+def _transition(
+    workflow: str,
+    action: str,
+    name: str,
+    *,
+    user_confirmed: bool = False,
+    accept_changes: bool = False,
+) -> int:
     root = _repo_root_or_error()
     state = load_state(root, workflow)
     if state is None:
         raise WorkflowError(f"no active {workflow} workflow")
     if workflow == "lifecycle":
         require_lifecycle_branch(root, state)
+        _require_compact_checkpoint_closed(state)
     order, user_gates, current_key = _definition(workflow)
     current = state[current_key]
     if name.upper() != current:
         raise WorkflowError(f"requested {name.upper()}, but current step is {current}")
     item = state["steps"][current]
+    if accept_changes and action != "approve":
+        raise WorkflowError("--accept-changes applies only to approving a gate")
 
     if action == "gate":
         if current not in user_gates:
             raise WorkflowError(f"{current} is not a user gate")
         if item["status"] != "in_progress":
             raise WorkflowError(f"{current} must be in_progress before opening its approval gate")
+        # A tracked state file would change the tree it is fingerprinting.
+        require_state_ignored(root, workflow)
         item["status"] = "awaiting_approval"
+        state["integrity"] = _integrity_snapshot(root, current)
         _history(state, "gate", current, "codex")
         save_state(root, workflow, state)
         print(f"{current} is awaiting explicit user approval.")
+        if state["integrity"]["tree"] is None:
+            print(f"integrity: unavailable ({_one_line(state['integrity']['error'])}); this gate is not checked.")
+        else:
+            print("integrity: snapshot recorded; changes before approval will be refused.")
         return 0
 
     transition_at: str | None = None
@@ -1000,6 +1173,23 @@ def _transition(workflow: str, action: str, name: str, *, user_confirmed: bool =
             raise WorkflowError(f"{current} is not awaiting approval")
         if not user_confirmed:
             raise WorkflowError("approval requires --user-confirmed after an explicit user message")
+        verdict, changed, detail = compare_integrity(root, state.get("integrity"))
+        if verdict == "changed":
+            if not accept_changes:
+                raise WorkflowError(
+                    f"{current} cannot be approved: the repository changed while its gate was open "
+                    f"({len(changed)}: {_describe_changes(changed)}). Show the user these changes. "
+                    "Only if the user accepts them as part of what they approve, rerun with "
+                    "--user-confirmed --accept-changes"
+                )
+            _history(state, "accept-changes", current, "user-explicit")
+            print(f"integrity: {len(changed)} change(s) accepted by the user: {_describe_changes(changed)}")
+        elif verdict in {"unavailable", "not-recorded"}:
+            _history(state, "integrity-unchecked", current, "codex")
+            print(f"integrity: not checked ({_one_line(detail)}); approval recorded without it.")
+        else:
+            print("integrity: intact since the gate opened.")
+        state.pop("integrity", None)
         transition_at = utc_now()
         item["approved_at"] = transition_at
         actor = "user-explicit"
@@ -1038,6 +1228,7 @@ def lifecycle_skip_components(args: argparse.Namespace) -> int:
     if state is None:
         raise WorkflowError("no active lifecycle workflow")
     require_lifecycle_branch(root, state)
+    _require_compact_checkpoint_closed(state)
     if args.step != "COMPONENTS" or state["current_step"] != "COMPONENTS":
         raise WorkflowError("only the active COMPONENTS step can be marked not applicable")
     item = state["steps"]["COMPONENTS"]
@@ -1673,7 +1864,9 @@ def _next_action(workflow: str, state: dict[str, Any]) -> str:
     """
     order, _, current_key = _definition(workflow)
     if workflow == "lifecycle" and state.get("awaiting_compact"):
-        return "compact the session, or skip-compact --user-confirmed"
+        if hooks_bundled():
+            return "compact the session, or skip-compact --user-confirmed"
+        return "ask the user to compact the session, then skip-compact --user-confirmed"
     current = state[current_key]
     status = state["steps"][current]["status"]
     if status == "awaiting_approval":
@@ -1737,6 +1930,15 @@ def print_status(workflow: str) -> int:
         print(f"spec: {_one_line(state['spec'])}")
     gate_name = _open_gate(workflow, state)
     print(f"open_gate: {gate_name if gate_name is not None else 'none'}")
+    if gate_name is not None:
+        verdict, changed, detail = compare_integrity(root, state.get("integrity"))
+        if verdict == "changed":
+            print(f"integrity: CHANGED since the gate opened ({len(changed)}: {_describe_changes(changed)})")
+        elif verdict == "intact":
+            print("integrity: intact since the gate opened")
+        else:
+            print(f"integrity: {verdict} ({_one_line(detail)})")
+    print(f"enforcement: {_enforcement_label()}")
     print(f"next_action: {_next_action(workflow, state)}")
     for name in order:
         item = state["steps"][name]
@@ -2498,9 +2700,14 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--step", required=True, choices=LIFECYCLE_STEPS)
         if action == "approve":
             item.add_argument("--user-confirmed", action="store_true")
+            item.add_argument("--accept-changes", action="store_true")
         item.set_defaults(
             func=lambda args, action=action: _transition(
-                "lifecycle", action, args.step, user_confirmed=getattr(args, "user_confirmed", False)
+                "lifecycle",
+                action,
+                args.step,
+                user_confirmed=getattr(args, "user_confirmed", False),
+                accept_changes=getattr(args, "accept_changes", False),
             )
         )
     skip = lifecycle_sub.add_parser("skip")
@@ -2550,9 +2757,14 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--phase", required=True, choices=PROJECT_PHASES)
         if action == "approve":
             item.add_argument("--user-confirmed", action="store_true")
+            item.add_argument("--accept-changes", action="store_true")
         item.set_defaults(
             func=lambda args, action=action: _transition(
-                "project-init", action, args.phase, user_confirmed=getattr(args, "user_confirmed", False)
+                "project-init",
+                action,
+                args.phase,
+                user_confirmed=getattr(args, "user_confirmed", False),
+                accept_changes=getattr(args, "accept_changes", False),
             )
         )
     project_sub.add_parser("status").set_defaults(func=lambda _args: print_status("project-init"))

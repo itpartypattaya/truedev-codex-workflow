@@ -7,7 +7,8 @@ Include:
 
 - the plugin version and Codex version;
 - operating system and Python version;
-- whether the plugin and hooks are enabled and trusted;
+- which edition you installed (GitHub marketplace or ChatGPT Plugins Directory) and, for the
+  GitHub edition, whether its hooks are enabled and trusted;
 - the workflow command or hook event that failed;
 - a minimal reproduction with secrets, personal data, repository contents, and transcripts removed.
 

@@ -1,51 +1,63 @@
 # Public submission package
 
-This document is the handoff for a skills-only, Codex-gated submission of TrueDev Workflow to the
-universal Plugins Directory. It separates repository evidence from Platform actions that only the
-verified publisher can complete.
+This document is the handoff for submitting the **directory edition** of TrueDev Workflow to the
+universal Plugins Directory through the **Skills only** path. It separates repository evidence from
+Platform actions that only the verified publisher can complete.
+
+Requirements were checked against the OpenAI developer documentation on 2026-10-06:
+[Submit plugins](https://developers.openai.com/plugins/deploy/submission),
+[Plugin guidelines](https://developers.openai.com/plugins/plugin-guidelines), and
+[Submission errors](https://developers.openai.com/plugins/deploy/submission-errors).
+
+## Why a separate edition
+
+The directory does not currently accept plugin ZIPs that contain lifecycle hooks. The directory
+edition is built from the same sources with `python scripts/package_plugin.py --edition directory`
+and differs from the GitHub edition in exactly three ways:
+
+- `hooks/` is left out; gates are held by the runner's integrity check, which refuses to approve a
+  gate whose evidence changed after it opened, and by the compact checkpoint, which the runner now
+  enforces on every transition;
+- the runner is copied into `skills/<skill>/scripts/`, so each skill bundle is self-contained, and
+  the root `scripts/` directory is not shipped;
+- each `skills/<skill>/agents/openai.yaml` gains `policy.products: ["CODEX"]`, because the skills
+  need a local repository, Git, and Python that a ChatGPT conversation does not have.
+
+`scripts/validate_release.py` checks the archive with `validate_directory_entries`, and
+`tests/test_release.py` proves the build is deterministic and that the bundled runner reports the
+correct edition.
 
 ## Listing
 
-- **Name:** TrueDev Workflow
-- **Short description:** Gated delivery for Codex
+- **Name:** TrueDev Workflow (16/30)
+- **Short description:** Gated delivery for Codex (24/30)
 - **Category:** Productivity
-- **Developer:** IT Party Pattaya
+- **Developer:** Anton Vaskov — must match the verified individual identity; the portal overrides
+  `developerName` with that identity
 - **Website:** <https://github.com/itpartypattaya/truedev-codex-workflow>
 - **Support:** <https://github.com/itpartypattaya/truedev-codex-workflow/issues>
 - **Privacy:** <https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/PRIVACY.md>
 - **Terms:** <https://github.com/itpartypattaya/truedev-codex-workflow/blob/main/TERMS.md>
 
-Long description:
-
-> Turn a specification into durable project artifacts, then deliver each vertical slice through
-> scoped planning, implementation, verification, review, and explicit approval gates.
-
-Release notes:
-
-> Initial native Codex release. Includes stack-neutral project initialization and slice lifecycle
-> skills, schema-validated local state, cross-platform lifecycle hooks, safe Git preflight, explicit
-> approval gates, public security and privacy documentation, and deterministic packaging.
+The long description and release notes live in `.codex-plugin/plugin.json`
+(`interface.longDescription`, `extensions.com.openai.publication.release_notes`) and are imported
+with the ZIP. The public URLs must resolve on `main` and name the same publisher, so merge before
+uploading.
 
 ## Assets
 
-- Directory composer icon: `assets/icon.svg`
-- Directory logo: `assets/logo.svg`
-- Dark-surface logo: `assets/logo-dark.svg`
-- Workflow review image: `docs/images/workflow-overview.png`
-- Guardrail review image: `docs/images/gate-guardrail.png`
+- Directory composer icon: `assets/icon.svg` (128×128)
+- Directory logo: `assets/logo.svg`, dark variant `assets/logo-dark.svg` (512×512)
 
-Both declared directory assets are square SVG files with numeric dimensions of at least 48×48.
-Review images are exactly 706 pixels wide. They are not declared in `interface.screenshots`: the
-skills-only upload contract excludes that field, and portal starter-prompt screenshots are only
-allowed when an MCP server exposes custom UI.
+Screenshots are not declared: the Skills only upload rejects `interface.screenshots`, and
+starter-prompt screenshots are allowed only when an MCP server exposes custom UI.
 
 ## Reviewer test inventory
 
-The machine-readable source is [`../evals/plugin/evals.json`](../evals/plugin/evals.json).
-The final independent single-run comparison is in
-[`../evals/results/benchmark.md`](../evals/results/benchmark.md), with raw grades and responses beside it.
-Use [`../evals/results/review.html`](../evals/results/review.html) for the standalone review UI. The
-benchmark is evidence from one run per case and configuration, not statistical proof.
+Skills-only plugins do not need MCP review cases or a demo recording. The cases below remain the
+behavioral evidence for this release; the machine-readable source is
+[`../evals/plugin/evals.json`](../evals/plugin/evals.json) and the single-run comparison is in
+[`../evals/results/benchmark.md`](../evals/results/benchmark.md).
 
 Positive cases:
 
@@ -69,28 +81,25 @@ Negative cases:
 python -m unittest discover -s tests -v
 ruff check .
 python scripts/validate_release.py --require-current-evidence
-python scripts/package_plugin.py
+python scripts/package_plugin.py --edition directory
 ```
 
 `--require-current-evidence` fails unless `evals/results/benchmark.json` records the version being
 released and a clean checkout that produced it. Rerun the suite whenever the skills or the runner
-change; `--resume` reuses only the runs whose inputs still match. Do not submit numbers produced for
-another version, or from a modified working tree.
+change; `--resume` reuses only the runs whose inputs still match.
 
-Upload `dist/truedev-workflow-1.1.17.zip` as **Skills only** after running a fresh installed-plugin
-smoke test from the exact release SHA.
+Upload `dist/truedev-workflow-<version>-directory.zip` as **Skills only** after a fresh install of
+that exact ZIP in Codex has shown both skills loading and `lifecycle status` reporting
+`enforcement: integrity check (this edition bundles no hooks)`.
 
 ## Publisher-owned steps
 
 These cannot be proven by repository tests:
 
-- merge the release commit into `main`, publish the legal URLs, and tag `v1.1.17`;
-- install the final package in a fresh Codex task and review/trust the hook hash;
-- confirm the two skills and three hooks load from the installed copy;
-- run the eight reviewer cases and retain outputs from the final release SHA;
-- use an OpenAI organization with **Apps Management** write access;
-- select a verified individual or business identity matching the listing;
-- choose supported countries/regions and complete the policy attestations;
-- submit for review, address findings, and explicitly publish after approval.
-
-Submission starts review and does not publish automatically.
+- verify the individual identity **Anton Vaskov** in the OpenAI Platform organization settings;
+- use an organization where you are owner or hold **Apps Management Write**;
+- merge the release into `main` so the legal URLs show the current publisher, and tag the version;
+- install the directory ZIP in a fresh Codex task and run the eight cases from the release SHA;
+- upload the ZIP, resolve **Metadata & Skills** findings (skill scans can take up to two hours);
+- choose country availability, complete the policy attestations, and submit for review;
+- publish explicitly after approval — approval does not publish automatically.
