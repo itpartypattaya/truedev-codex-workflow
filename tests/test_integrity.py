@@ -93,6 +93,30 @@ class GateIntegrityTests(WorkflowFixture):
         self.assertEqual(code, 2)
         self.assertIn("HEAD moved", error)
 
+    def test_index_trust_flags_do_not_hide_an_edit(self) -> None:
+        # A copied index keeps these bits; without clearing them `git add -A` skips
+        # the edited path and the gate reports intact evidence that has changed.
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            with self.subTest(flag=flag):
+                self.tearDown()
+                self.setUp()
+                git(self.root, "update-index", flag, "README.md")
+                self.open_scope_gate()
+                (self.root / "README.md").write_text("edited behind the flag\n", encoding="utf-8")
+                code, _, error = self.approve()
+                self.assertEqual(code, 2, f"{flag} hid the edit")
+                self.assertIn("README.md", error)
+                listed = git(self.root, "ls-files", "-v", "README.md").stdout
+                self.assertEqual(listed[:1], "h" if flag == "--assume-unchanged" else "S")
+
+    def test_ignore_stat_config_does_not_hide_an_edit(self) -> None:
+        git(self.root, "config", "core.ignoreStat", "true")
+        self.open_scope_gate()
+        (self.root / "README.md").write_text("edited under ignoreStat\n", encoding="utf-8")
+        code, _, error = self.approve()
+        self.assertEqual(code, 2)
+        self.assertIn("README.md", error)
+
     def test_fingerprint_leaves_the_real_index_untouched(self) -> None:
         (self.root / "staged.txt").write_text("staged\n", encoding="utf-8")
         git(self.root, "add", "staged.txt")

@@ -784,14 +784,59 @@ def _enforcement_label() -> str:
     return "integrity check (this edition bundles no hooks)"
 
 
+# Settings under which `git add` may trust the index instead of looking at a file.
+FINGERPRINT_GIT_CONFIG = ("-c", "core.ignoreStat=false", "-c", "core.untrackedCache=false")
+
+
+def _clear_index_trust_flags(root: Path, env: Mapping[str, str]) -> str | None:
+    """Drop assume-unchanged and skip-worktree bits from the temporary index copy.
+
+    A copied index keeps both bits, and `git add -A` then leaves an edited path at
+    its old blob, so changed evidence fingerprints as intact. Paths stay bytes end to
+    end so a name that is not valid UTF-8 is cleared rather than skipped. Each bit
+    needs its own `update-index` call: given both, Git applies only one of them.
+    Returns an error message, or None.
+    """
+    git_env = _git_env()
+    git_env.update(env)
+    base = ["git", "-C", str(root), "-c", "core.fsmonitor=false", *FINGERPRINT_GIT_CONFIG]
+    try:
+        listed = subprocess.run([*base, "ls-files", "-v", "-z"], capture_output=True, env=git_env, check=False)
+    except OSError as exc:
+        return f"git ls-files failed: {exc}"
+    if listed.returncode != 0:
+        return listed.stderr.decode("utf-8", "replace").strip() or "git ls-files failed"
+    records = [record for record in listed.stdout.split(b"\0") if len(record) > 2]
+    # `ls-files -v` tags assume-unchanged entries in lower case and skip-worktree as S/s.
+    assumed = [record[2:] for record in records if record[:1].islower()]
+    skipped = [record[2:] for record in records if record[:1] in (b"S", b"s")]
+    for flag, paths in (("--no-assume-unchanged", assumed), ("--no-skip-worktree", skipped)):
+        if not paths:
+            continue
+        try:
+            cleared = subprocess.run(
+                [*base, "update-index", flag, "-z", "--stdin"],
+                input=b"\0".join(paths) + b"\0",
+                capture_output=True,
+                env=git_env,
+                check=False,
+            )
+        except OSError as exc:
+            return f"git update-index failed: {exc}"
+        if cleared.returncode != 0:
+            return cleared.stderr.decode("utf-8", "replace").strip() or "git update-index failed"
+    return None
+
+
 def working_tree_fingerprint(root: Path) -> dict[str, Any]:
     """Hash HEAD and every non-ignored file without touching the user's index.
 
     A copy of the index keeps Git's stat cache, so only changed files are rehashed.
-    `git add` into that copy writes unreferenced objects that `git gc` later prunes;
-    nothing is staged, committed, or referenced. A failure is reported, never raised:
-    a repository this cannot hash must still be workable, and "unchecked" is recorded
-    as such rather than read as "clean".
+    Its assume-unchanged and skip-worktree bits are cleared first, so no tracked path
+    is exempt from being looked at. `git add` into that copy writes unreferenced
+    objects that `git gc` later prunes; nothing is staged, committed, or referenced.
+    A failure is reported, never raised: a repository this cannot hash must still be
+    workable, and "unchecked" is recorded as such rather than read as "clean".
     """
     result: dict[str, Any] = {"head": head_sha(root), "tree": None}
     located = _run_git(root, "rev-parse", "--git-path", "index")
@@ -810,7 +855,13 @@ def working_tree_fingerprint(root: Path) -> dict[str, Any]:
             result["error"] = _one_line(f"cannot copy the Git index: {exc}")[:500]
             return result
         env = {"GIT_INDEX_FILE": str(temp_index)}
-        added = _run_git(root, "-c", "advice.addIgnoredFile=false", "add", "-A", extra_env=env)
+        failure = _clear_index_trust_flags(root, env)
+        if failure is not None:
+            result["error"] = _one_line(failure)[:500]
+            return result
+        added = _run_git(
+            root, *FINGERPRINT_GIT_CONFIG, "-c", "advice.addIgnoredFile=false", "add", "-A", extra_env=env
+        )
         if added.returncode != 0:
             result["error"] = _one_line(added.stderr.strip() or "git add failed")[:500]
             return result

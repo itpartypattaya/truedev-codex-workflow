@@ -16,7 +16,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
   listing the changed paths; `--accept-changes`, given only after the user has seen them, approves
   anyway and leaves an `accept-changes` receipt. A tree that cannot be hashed is reported as
   unchecked, never as clean. This catches changes from tools that emit no hook event, at approval
-  time rather than at write time.
+  time rather than at write time. The temporary index has its assume-unchanged and skip-worktree
+  bits cleared and `core.ignoreStat` overridden, because a copied index kept them and `git add -A`
+  then left an edited path at its old blob.
 - `status` prints an `integrity:` line for an open gate and an `enforcement:` line naming what the
   installed edition actually enforces.
 - `interface.supportURL` and `extensions.com.openai.publication.release_notes` in the manifest.

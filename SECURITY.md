@@ -34,7 +34,9 @@ call while a gate is open. Both editions run the gate integrity check below, and
 reports which enforcement is in effect.
 
 When a gate opens, the runner records `HEAD` and a Git tree id of every non-ignored file, hashed
-through a temporary copy of the index. Approval recomputes both and refuses on any difference unless
+through a temporary copy of the index. The copy's assume-unchanged and skip-worktree bits are
+cleared and `core.ignoreStat` is overridden first, so no tracked path is exempt from being looked at;
+the user's own index keeps its flags. Approval recomputes both and refuses on any difference unless
 the user accepts the listed changes with `--accept-changes`, which leaves its own receipt. This
 check sees changes made through any path, including tools that emit no hook event, but it detects
 at approval time rather than preventing at write time. It does not cover Git-ignored files,
