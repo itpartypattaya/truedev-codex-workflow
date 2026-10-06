@@ -27,6 +27,12 @@ an OS advisory lock and validates these invariants before every atomic replace:
 - `awaiting_compact` is boolean and is cleared by a validated compact-session hook or an explicit
   `skip-compact --user-confirmed` receipt when the host event is unavailable. That receipt is kept
   and `status` prints it, so a deliberate bypass stays visible for the rest of the run.
+- `integrity` exists only while the current user gate awaits approval. It records `step`, `head`,
+  `tree` (a Git tree id for every non-ignored file, hashed through a temporary index so the user's
+  index is untouched), and `taken_at`; when the tree could not be hashed it records `error` instead
+  of `tree`. Approval recomputes it: a difference is refused unless the user accepts it, which adds
+  an `accept-changes` receipt; an unavailable or missing snapshot adds `integrity-unchecked`. Both
+  editions run this check, and it is the only one in the edition that bundles no hooks.
 - History contains transition metadata, not free-form prompts or repository content.
 - Stored text contains no line breaks, so a status field cannot fabricate another one.
 - `head_sha` records the commit the workflow started from. It never blocks a transition; `status`

@@ -16,9 +16,11 @@ guardrails.
 
 ## Locate the bundled runner
 
-Let `<SKILL_DIR>` be the directory containing this `SKILL.md`. Its grandparent is `<PLUGIN_ROOT>`:
+Let `<SKILL_DIR>` be the directory containing this `SKILL.md`; its grandparent is `<PLUGIN_ROOT>`.
+`<RUNNER>` is the first of these that exists:
 
 ```text
+<SKILL_DIR>/scripts/truedev_workflow.py
 <PLUGIN_ROOT>/scripts/truedev_workflow.py
 ```
 
@@ -38,6 +40,10 @@ the user's repository.
   blocked dependency.
 - **approve `<STEP>`:** only after the user's latest message explicitly approves that exact gate,
   run `lifecycle complete --step <STEP> --user-confirmed`.
+- **approval refused because the repository changed:** the gate recorded the working tree when it
+  opened. Show the user the listed paths and ask whether those changes are part of what they
+  approve. Add `--accept-changes` only after they say so; otherwise leave the gate open and let them
+  decide what to revert. Never revert, restage, or commit to make the check pass.
 - **ambiguous response at a user gate:** do not transition. Name the gate and ask the user to approve
   it or reject/request revisions to the presented evidence.
 - **continue/resume:** validate state, then recover the task itself from durable artifacts — the
@@ -62,6 +68,8 @@ the user's repository.
 - **compact event unavailable:** explain the missing host evidence and use
   `skip-compact --user-confirmed` only after the user explicitly accepts bypassing that checkpoint.
   Never run it on your own initiative to get past a block; `status` prints the bypass afterwards.
+  When `status` reports that this edition bundles no hooks, nothing observes compaction: ask the
+  user to compact the task, and run `skip-compact --user-confirmed` once they confirm it is done.
 
 If a runner command fails, report the error once. Do not retry by weakening validation or editing the
 state file manually.
@@ -143,7 +151,9 @@ python3 <RUNNER> lifecycle archive
 ```
 
 Before `gate`, finish the work and present the evidence the user needs to decide. After `gate`, stop
-mutating the repository until approval. A vague “continue” does not approve a named gate when the
+mutating the repository until approval: the runner fingerprints the working tree when the gate
+opens and refuses an approval of evidence that has moved since, whether or not hooks are installed.
+`status` names the enforcement in effect on its `enforcement:` line. A vague “continue” does not approve a named gate when the
 decision or consequences are unclear.
 
 While a gate is open, use only the runner's validation/status commands or its hardened inspection

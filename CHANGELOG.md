@@ -4,6 +4,43 @@ All notable changes to this plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-10-06
+
+### Added
+- A directory edition for the ChatGPT Plugins Directory, built with
+  `scripts/package_plugin.py --edition directory`. The directory does not accept lifecycle hooks,
+  so this edition ships without `hooks/`, copies the runner into each skill, and gates both skills
+  to Codex in `agents/openai.yaml`. The GitHub edition is unchanged and keeps its hooks.
+- Gate integrity check in both editions. Opening a gate records `HEAD` and a Git tree id of every
+  non-ignored file, hashed through a temporary index copy. Approval is refused if either moved,
+  listing the changed paths; `--accept-changes`, given only after the user has seen them, approves
+  anyway and leaves an `accept-changes` receipt. A tree that cannot be hashed is reported as
+  unchecked, never as clean. This catches changes from tools that emit no hook event, at approval
+  time rather than at write time. The temporary index has its assume-unchanged and skip-worktree
+  bits cleared and `core.ignoreStat` overridden, because a copied index kept them and `git add -A`
+  then left an edited path at its old blob.
+- `status` prints an `integrity:` line for an open gate and an `enforcement:` line naming what the
+  installed edition actually enforces.
+- `interface.supportURL` and `extensions.com.openai.publication.release_notes` in the manifest.
+
+### Changed
+- The runner refuses every lifecycle transition, `skip` included, while the compact checkpoint is
+  open. The pre-tool hook used to be the only thing holding that line, and it let runner commands
+  through.
+- Without hooks, `next_action` and the skills present compacting and then
+  `skip-compact --user-confirmed` as the normal path rather than as a bypass.
+- Skills look for the runner in their own `scripts/` directory first, then at the plugin root.
+- Publisher is Anton Vaskov, the verified identity the directory will display; README, PRIVACY,
+  TERMS, and the manifest say so. The long description now states users, tasks, and limitations.
+- `SECURITY.md` and both READMEs no longer claim there is no network client: the opt-in update
+  check of the full edition is the one request the plugin can make.
+
+### Fixed
+- A release test restored `evals/results/benchmark.json` in text mode, turning it into CRLF on
+  Windows and leaving the published evidence looking modified.
+- `tests/test_release.py` loaded `package_plugin` without its import path and passed only when
+  another test module had set it up.
+
 ## [1.1.17] — 2026-09-02
 
 ### Added

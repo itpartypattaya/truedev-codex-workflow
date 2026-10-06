@@ -48,9 +48,10 @@ the evidence presented to the user.
    behavior, and visual verification. Reuse the project's established design system.
 4. For data or schema work, document migration, compatibility, rollback, and immutable-data rules.
 5. Synchronize the Codex plan, finish PLAN, and ask the user to compact before implementation. The
-   runner sets `awaiting_compact`; the SessionStart hook clears it after a real compact event. If the
-   host never emits that event, present the limitation and require explicit user confirmation before
-   `lifecycle skip-compact --user-confirmed`.
+   runner sets `awaiting_compact` and refuses every transition until it clears; the SessionStart hook
+   clears it after a real compact event. If the host never emits that event, or `status` reports that
+   this edition bundles no hooks, ask the user to compact and require their explicit confirmation
+   before `lifecycle skip-compact --user-confirmed`.
 
 ## COMPONENTS — user gate
 

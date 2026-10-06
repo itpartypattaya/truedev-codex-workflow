@@ -8,7 +8,8 @@ On a task that runs for hours, an agent tends to wander. It edits files nobody a
 work finished without running anything, and commits or pushes on its own initiative. TrueDev breaks
 the work into named steps and stops at the ones that matter, waiting for you to say yes out loud.
 Until you do, changes to the repository are blocked — not by the agent promising to behave, but by
-Codex hooks that refuse the tool call.
+Codex hooks that refuse the tool call, and by a runner that will not record your approval of
+evidence that changed after the gate opened.
 
 ![TrueDev workflow overview](docs/images/workflow-overview.png)
 
@@ -20,6 +21,7 @@ Codex hooks that refuse the tool call.
 | `lifecycle` skill | Walks one slice from context through scope, plan, implementation, tests, review, docs, and closeout |
 | Codex hooks | Refuse file-changing tools while a gate is open, and check the state file when a turn ends |
 | Python runner | Owns the state file: validated transitions, atomic writes, an archive of finished work, and a Git safety check |
+| Gate integrity check | Fingerprints the working tree when a gate opens and refuses the approval if anything moved since |
 
 The skills do not assume a stack. They read your repository to find out how it builds and tests
 itself rather than reaching for npm, React, Vitest, Playwright, or a `master` branch.
@@ -31,7 +33,21 @@ itself rather than reaching for npm, React, Vitest, Playwright, or a `master` br
 - Python 3.9 or newer — `python3` on macOS and Linux, `python` on Windows
 
 Codex shows you each hook and asks you to trust it by hash. Without trusted hooks the skills and the
-runner still work, but nothing blocks changes automatically.
+runner still work and the integrity check still refuses an approval of moved evidence, but nothing
+stops a change at the moment it is made.
+
+## Two editions
+
+| | GitHub marketplace | ChatGPT Plugins Directory |
+| --- | --- | --- |
+| Skills and runner | Yes | Yes, with the runner copied into each skill |
+| Gate integrity check | Yes | Yes |
+| Codex hooks | Yes — changes are refused as they happen | No — the directory does not accept lifecycle hooks yet |
+| Compact checkpoint | Cleared by the host's compact event | You compact, then confirm with `skip-compact --user-confirmed` |
+| Update notice | At session start | Handled by the directory |
+
+Both are built from this repository by `scripts/package_plugin.py`. `lifecycle status` names the
+edition in effect on its `enforcement:` line, so you never have to guess which guard is running.
 
 ## Install
 
@@ -87,8 +103,10 @@ runner owns the state file, and the hooks sit in front of every tool call to che
 After PLAN the lifecycle asks you to compact the Codex session, because the plan is long and the
 implementation should not carry it. Compacting clears that gate and hands the next session a short
 summary — the workflow name, the current step, its status, and the slice file. Your task text and
-raw state never make it into that summary. If your Codex build does not emit a compact event, you
-can release the gate deliberately with `lifecycle skip-compact --user-confirmed`.
+raw state never make it into that summary. If your Codex build does not emit a compact event, or
+you installed the directory edition, which has no hook to observe it, compact the session yourself
+and release the gate with `lifecycle skip-compact --user-confirmed`. Until it is released the runner
+refuses every transition.
 
 ## Starting on a project that already exists
 
@@ -152,6 +170,7 @@ The skills run these for you. `<RUNNER>` is the bundled script at
 | `lifecycle start --task <task> --slice <file>` | Preflight, then open a lifecycle for one slice |
 | `lifecycle status` | The step table, the open gate, and the one next action |
 | `lifecycle complete --step <STEP> --user-confirmed` | Your approval on a user gate. The only thing that clears one |
+| `... complete ... --user-confirmed --accept-changes` | Approve a gate even though the repository changed while it was open, after you have seen the changed paths. Recorded as its own receipt |
 | `lifecycle skip-compact --user-confirmed` | Continue without compacting, on purpose. Recorded, and shown by `status` afterwards |
 | `lifecycle recover --accept-current-branch --user-confirmed` | Rebind a workflow whose branch changed underneath it |
 | `lifecycle recover --rebuild --task <task> --user-confirmed` | Recreate a lost state file. Starts the steps over; every gate comes back pending |
@@ -190,6 +209,16 @@ Hosted tools and specialized tool paths may not emit hook events at all. Your re
 permissions, sandboxing, protected branches, CI, and provider-side authorization are what actually
 hold the line.
 
+The runner adds a second check that does not depend on what the host reports. When a gate opens it
+records `HEAD` and a Git tree id of every non-ignored file, hashed through a temporary copy of the
+index so yours is never touched. Approval recomputes it. If anything changed — an edit, a new file,
+a commit, whichever tool made it — the approval is refused with the changed paths, and only
+`--accept-changes` after you have seen them lets it through. This catches what hooks cannot see,
+but only at the moment of approval, not as it happens. Git-ignored files and uncommitted changes
+inside submodules are outside the fingerprint. Hashing writes unreferenced objects into the
+repository's own `.git/objects`, which `git gc` removes. If the tree cannot be hashed, `status` and
+the approval say "not checked" instead of reporting it clean.
+
 While a gate is open the agent can still gather evidence, but only through the bundled `inspect
 git-status`, `inspect git-diff`, and `inspect file` commands. Raw shell reads are blocked, because
 Git helpers and PowerShell providers can turn a supposedly read-only command into code execution or
@@ -209,8 +238,8 @@ A few details worth knowing; [`SECURITY.md`](SECURITY.md) has the full trust mod
   commit as `MOVED` when history is rewritten under an unchanged branch name.
 - Output is UTF-8 whatever the console code page says.
 
-There is no telemetry and no bundled network client; [`PRIVACY.md`](PRIVACY.md) states exactly what
-is stored and where.
+There is no telemetry, and the only network request the plugin can make is the opt-in update check
+described below; [`PRIVACY.md`](PRIVACY.md) states exactly what is stored and where.
 
 ## Updates
 
@@ -310,9 +339,11 @@ Check the release contract and build the public package:
 ```text
 python scripts/validate_release.py
 python scripts/package_plugin.py
+python scripts/package_plugin.py --edition directory
 ```
 
-The ZIP deliberately leaves out marketplace metadata, tests, eval definitions and fixtures,
+The first ZIP is the full edition. The `directory` ZIP drops `hooks/`, copies the runner into each
+skill, and gates both skills to Codex in their `agents/openai.yaml`. Both ZIPs deliberately leave out marketplace metadata, tests, eval definitions and fixtures,
 screenshots, and repository-only docs. A skills-only submission must not declare
 `interface.screenshots`; the review images in `docs/images/` are separate submission assets.
 
@@ -327,4 +358,5 @@ rather than a statistical claim, produced from the exact commit they describe. S
 
 ## License
 
-MIT. The original upstream copyright and license are kept in [`LICENSE`](LICENSE).
+MIT. Maintained and published by Anton Vaskov as part of IT Party Pattaya. The original upstream
+copyright and license are kept in [`LICENSE`](LICENSE).

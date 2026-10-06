@@ -7,8 +7,8 @@ reference the exact commit SHA.
 
 ## Trust model
 
-TrueDev Workflow coordinates a model-driven process. Its hooks are guardrails, not a complete
-security boundary. The authoritative controls remain Codex approvals and sandboxing, operating-system and
+TrueDev Workflow coordinates a model-driven process. Its hooks and checks are guardrails, not a
+complete security boundary. The authoritative controls remain Codex approvals and sandboxing, operating-system and
 repository permissions, protected branches, CI, secrets management, and provider-side
 authorization.
 
@@ -26,6 +26,27 @@ residual risk rather than enumerate it, change the `PreToolUse` matcher in `hook
 a second per invocation on Windows, dominated by interpreter startup, and `.*` applies that cost to
 every tool call including read-only ones. The enumerated default keeps read-heavy sessions
 responsive; `.*` is the safer setting for an untrusted repository.
+
+The plugin ships in two editions. The full edition, installed from the GitHub marketplace, bundles
+the hooks described above. The directory edition, distributed through the ChatGPT Plugins Directory,
+bundles no hooks, because the directory does not accept lifecycle hooks; nothing there stops a tool
+call while a gate is open. Both editions run the gate integrity check below, and `lifecycle status`
+reports which enforcement is in effect.
+
+When a gate opens, the runner records `HEAD` and a Git tree id of every non-ignored file, hashed
+through a temporary copy of the index. The copy's assume-unchanged and skip-worktree bits are
+cleared and `core.ignoreStat` is overridden first, so no tracked path is exempt from being looked at;
+the user's own index keeps its flags. Approval recomputes both and refuses on any difference unless
+the user accepts the listed changes with `--accept-changes`, which leaves its own receipt. This
+check sees changes made through any path, including tools that emit no hook event, but it detects
+at approval time rather than preventing at write time. It does not cover Git-ignored files,
+uncommitted changes inside submodules, or the state directory itself. Hashing writes unreferenced
+objects into the repository's `.git/objects`, which `git gc` prunes. A tree that cannot be hashed is
+recorded and reported as unchecked, never as clean.
+
+While the compact checkpoint is open the runner refuses every transition. In the directory edition
+nothing observes compaction, so the checkpoint is released with `skip-compact --user-confirmed`
+after the user confirms they compacted the task.
 
 ## Data and command boundaries
 
@@ -57,11 +78,15 @@ responsive; `.*` is the safer setting for an untrusted repository.
   repository-controlled text cannot forge the status the model reads.
 - Output is written as UTF-8 regardless of the console code page.
 - The runner does not pull, stage all, push, merge, reset, delete branches, or remove worktrees.
-- The plugin has no network client, telemetry, credential store, or MCP server.
+- The plugin has no telemetry, credential store, or MCP server. Its only network request is the
+  opt-in update check of the full edition, described in `PRIVACY.md`; the directory edition makes
+  none.
 
 ## Known limitations
 
-- Disabling or declining trust for hooks removes automatic mutation blocking.
+- Disabling or declining trust for hooks, or installing the directory edition, removes automatic
+  mutation blocking. The integrity check still refuses approval of evidence that changed, but only
+  when approval is attempted.
 - A missing or shadowed Python executable prevents hook execution.
 - An agent or external process with direct filesystem access can alter local state outside the
   runner; schema checks detect many but not all malicious environmental changes.

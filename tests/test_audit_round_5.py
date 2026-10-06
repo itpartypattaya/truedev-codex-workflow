@@ -590,7 +590,10 @@ class ReviewRoundEightTests(WorkflowFixture):
     def test_release_gate_rejects_evidence_from_a_modified_tree(self) -> None:
         validator = load_release_validator()
         benchmark = ROOT / "evals" / "results" / "benchmark.json"
-        original = benchmark.read_text(encoding="utf-8")
+        # Restore the exact bytes: a text-mode write turns LF into CRLF on Windows and
+        # leaves the published evidence looking modified.
+        original_bytes = benchmark.read_bytes()
+        original = original_bytes.decode("utf-8")
         data = json.loads(original)
         version = data["metadata"]["plugin_version"]
         try:
@@ -614,4 +617,4 @@ class ReviewRoundEightTests(WorkflowFixture):
                     ):
                         validator.validate_evidence_is_current({"version": version})
         finally:
-            benchmark.write_text(original, encoding="utf-8")
+            benchmark.write_bytes(original_bytes)

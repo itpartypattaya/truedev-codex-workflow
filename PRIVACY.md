@@ -2,17 +2,20 @@
 
 Effective date: 2026-08-31
 
-TrueDev Workflow is a skills-only Codex plugin maintained by IT Party Pattaya. It does not include
-telemetry, analytics, advertising, or an MCP server. The maintainer does not receive repository
+TrueDev Workflow is a Codex plugin published and maintained by Anton Vaskov as part of IT Party
+Pattaya. It does not include telemetry, analytics, advertising, or an MCP server. It ships in two
+editions: the full edition from the GitHub marketplace bundles Codex lifecycle hooks, and the
+directory edition from the ChatGPT Plugins Directory bundles none. The maintainer does not receive repository
 contents, prompts, workflow state, or hook payloads through the plugin.
 
 It makes no network request unless you ask for one. The only request it can make at all is the
-update check described below, it is off by default, and it sends nothing about you or your
-repository.
+update check described below, it is off by default, it exists only in the full edition, and it sends
+nothing about you or your repository.
 
 ## The update check
 
-At the start of a session the plugin compares the installed version against the marketplace clone
+This section applies to the full edition only; the directory edition has no hooks and never checks
+for updates. At the start of a session the plugin compares the installed version against the marketplace clone
 already on your disk. That comparison is entirely local: it reads manifest files under your Codex
 home and makes no request. When a newer version is found it prints one line and adds one sentence
 of context; it never updates anything itself, because that would run new code on your machine.
@@ -32,8 +35,16 @@ When enabled, the plugin may process information already available to the user's
 
 - repository paths, Git status, branch names, and project documentation;
 - the specification, task, or slice selected by the user;
-- Codex hook event fields needed to identify the working directory, event, tool, and tool input;
-- approval and workflow-transition timestamps.
+- in the full edition, Codex hook event fields needed to identify the working directory, event,
+  tool, and tool input;
+- approval and workflow-transition timestamps;
+- while an approval gate is open, a Git commit id and a Git tree id that fingerprint the
+  non-ignored working tree.
+
+To compute that fingerprint the runner hashes the working tree through a temporary copy of the Git
+index. This writes unreferenced objects into the repository's own `.git/objects` directory, where
+`git gc` removes them; the fingerprint is cleared from the state once the gate is approved. Nothing
+about it leaves your machine.
 
 Active state and archive receipts are stored locally inside the selected repository under
 `.truedev-workflow/`. State is schema-validated, written atomically, and expected to remain

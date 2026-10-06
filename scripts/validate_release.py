@@ -88,7 +88,7 @@ def validate_manifest() -> dict[str, Any]:
     for field, limit in limits.items():
         value = interface.get(field)
         require(isinstance(value, str) and 0 < len(value) <= limit, f"interface.{field} must be 1..{limit} characters")
-    for field in ("websiteURL", "privacyPolicyURL", "termsOfServiceURL"):
+    for field in ("websiteURL", "supportURL", "privacyPolicyURL", "termsOfServiceURL"):
         value = interface.get(field)
         require(isinstance(value, str) and value.startswith("https://"), f"interface.{field} must be HTTPS")
         require(len(value) <= 1024, f"interface.{field} exceeds final-submission limit")
@@ -99,6 +99,20 @@ def validate_manifest() -> dict[str, Any]:
     assert isinstance(prompts, list)
     require(all(isinstance(item, str) and 0 < len(item) <= 128 and "\n" not in item for item in prompts), "defaultPrompt entries must be single-line and at most 128 characters")
     require("screenshots" not in interface, "skills-only manifests must not declare interface.screenshots")
+    capabilities = interface.get("capabilities")
+    require(
+        isinstance(capabilities, list)
+        and len(capabilities) <= 20
+        and all(isinstance(item, str) and 0 < len(item) <= 120 and "\n" not in item for item in capabilities),
+        "capabilities must be at most 20 single-line labels of at most 120 characters",
+    )
+    publication = manifest.get("extensions", {}).get("com.openai", {}).get("publication", {})
+    notes = publication.get("release_notes")
+    require(isinstance(notes, str) and notes.strip(), "extensions.com.openai.publication.release_notes is required")
+    require(
+        set(manifest.get("extensions", {}).get("com.openai", {})) <= {"publication", "onboardingSkill"},
+        "skills-only packages carry no review block, apps, or hooks under extensions.com.openai",
+    )
     for field in IMAGE_FIELDS:
         asset = _asset_path(interface.get(field), field)
         require(asset.suffix.lower() == ".svg", f"interface.{field} must use the reviewed SVG asset")
@@ -213,6 +227,28 @@ def validate_evidence_is_current(manifest: dict[str, Any]) -> None:
         f"benchmark evidence was produced from a modified working tree ({commit}); "
         "rerun the eval suite from a clean checkout of the release SHA",
     )
+
+
+DIRECTORY_FORBIDDEN_PREFIXES = ("hooks/", ".agents/", "scripts/", "evals/", "docs/", "tests/")
+DIRECTORY_FORBIDDEN_NAMES = frozenset({".app.json", ".mcp.json", "mcp.json"})
+
+
+def validate_directory_entries(entries: dict[str, bytes]) -> None:
+    """Check a directory-edition archive against what the Skills only upload accepts."""
+    names = set(entries)
+    for name in names:
+        require(not name.startswith(DIRECTORY_FORBIDDEN_PREFIXES), f"directory edition must not ship {name}")
+        require(name.rsplit("/", 1)[-1] not in DIRECTORY_FORBIDDEN_NAMES, f"directory edition must not ship {name}")
+    manifest = json.loads(entries[".codex-plugin/plugin.json"].decode("utf-8"))
+    require("apps" not in manifest and "hooks" not in manifest and "mcpServers" not in manifest, "directory manifest must be skills-only")
+    require("screenshots" not in manifest.get("interface", {}), "directory manifest must not declare screenshots")
+    for skill in ("lifecycle", "project-init"):
+        runner = f"skills/{skill}/scripts/truedev_workflow.py"
+        require(runner in names, f"directory edition must bundle {runner}")
+        policy = entries[f"skills/{skill}/agents/openai.yaml"].decode("utf-8")
+        require('products:\n    - "CODEX"\n' in policy, f"directory edition must gate {skill} to Codex")
+    total = sum(len(data) for data in entries.values())
+    require(total <= 512 * 1024 * 1024 and len(entries) <= 5000, "directory edition exceeds archive limits")
 
 
 def validate_no_legacy_host_text() -> None:
