@@ -22,6 +22,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `status` prints an `integrity:` line for an open gate and an `enforcement:` line naming what the
   installed edition actually enforces.
 - `interface.supportURL` and `extensions.com.openai.publication.release_notes` in the manifest.
+- Listing category is Developer Tools. The directory's metadata check could not confirm
+  Productivity for a Codex coding workflow.
 
 ### Changed
 - The runner refuses every lifecycle transition, `skip` included, while the compact checkpoint is

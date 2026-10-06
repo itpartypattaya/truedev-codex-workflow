@@ -31,7 +31,7 @@ correct edition.
 
 - **Name:** TrueDev Workflow (16/30)
 - **Short description:** Gated delivery for Codex (24/30)
-- **Category:** Productivity
+- **Category:** Developer Tools — the directory could not confirm Productivity for a coding workflow
 - **Developer:** Anton Vaskov — must match the verified individual identity; the portal overrides
   `developerName` with that identity
 - **Website:** <https://github.com/itpartypattaya/truedev-codex-workflow>
